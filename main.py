@@ -1,12 +1,18 @@
-from pypdf import PdfReader
-import litellm
-from functools import reduce
+import json
 from datetime import datetime
+from functools import reduce
+from itertools import islice
+
+import litellm
+from pypdf import PdfReader
+
+from urllib.request import urlretrieve
+
 
 
 reader = PdfReader("inkheart_RuLit_Me_789272.pdf")
 
-SYSTEM_PROMPT = """
+CLEANER_PROMPT_PROMPT = """
 You perform a clean-up work for a PDF scanning project. You will be given
 raw character data. Your job is to convert it to a valid JSONL-sequence formatted
 like this:
@@ -60,6 +66,33 @@ def process_book():
             out.write(response.choices[0].message.content)
             page_number += batch_size
         print(f"Done writing.")
+
+def generate_speech(text: str, filename: str):
+    data = json.dumps({
+        "text": text,
+        "instruct": "female, low pitch, british accent"
+    }).encode("utf-8")
+
+    urlretrieve(
+        "http://localhost:8900/generate-audio",
+        filename=filename,
+        data=data,
+    )
+
+def read_jsonl(filename):
+    with open(filename) as jsonl:
+        lines: list[str] = jsonl.readlines()
+        objects = []
+        for (i, line) in enumerate(lines):
+            objects.append(json.loads(line))
+
+        return objects
+
+
+sentences = list(islice((x for x in read_jsonl("out.jsonl") if x["type"] == "sentence"), 5))
+sentences
+for (i, sentence) in enumerate(sentences):
+    generate_speech(sentence["content"], f"sentence-{i}.wav")
 
 if __name__ == "__main__":
     process_book()

@@ -1,3 +1,8 @@
+## BUGS
+
+- [ ] out.jsonl producer sometimes glues two JSON objects on a singe line
+
+## Sloppio
 1. Разделение голосов (Два разных движка TTS)
 
 Ни в коем случае нельзя начитывать оригинал и перевод одним голосом.
