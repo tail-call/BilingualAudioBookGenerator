@@ -1,3 +1,4 @@
+
 ## BUGS
 
 - [ ] out.jsonl producer sometimes glues two JSON objects on a single line
@@ -7,6 +8,10 @@
 - [ ] Use the words frequency dictionary to estimate uncommon words instead of trying to predict them with an LLM.
 - [ ] Use a simpler NLP model for sentence extraction.
 
+
+
+- https://github.com/Den4ikAI/ruaccent
+- https://huggingface.co/siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf
 
 
 ## Sloppio

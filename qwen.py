@@ -33,10 +33,14 @@ model = Qwen3TTSModel.from_pretrained(
 
 test_text = "Many years later, Meggie had only to close her eyes and she could still hear it, like tiny fingers tapping on the windowpane.",
 
-def generate_audio(text: str, instruct: str) -> AudioSegment:
+def generate_audio(
+    text: str,
+    instruct: str,
+    language: str,
+    ) -> AudioSegment:
     audio, samplerate = model.generate_custom_voice(
         text=text,
-        language="English",
+        language=language,
         speaker="Aiden",
         instruct=instruct,
     )
