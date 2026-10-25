@@ -1,6 +1,13 @@
 ## BUGS
 
-- [ ] out.jsonl producer sometimes glues two JSON objects on a singe line
+- [ ] out.jsonl producer sometimes glues two JSON objects on a single line
+
+## IDEAS
+
+- [ ] Use the words frequency dictionary to estimate uncommon words instead of trying to predict them with an LLM.
+- [ ] Use a simpler NLP model for sentence extraction.
+
+
 
 ## Sloppio
 1. Разделение голосов (Два разных движка TTS)

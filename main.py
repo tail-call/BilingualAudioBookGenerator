@@ -1,44 +1,50 @@
 import json
 from datetime import datetime
 from functools import reduce
+from glob import glob
 from itertools import islice
-
-import litellm
-from pypdf import PdfReader
-
+from typing import Literal
 from urllib.request import urlretrieve
 
+import litellm
+from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
+from litellm.types.utils import ModelResponse
+from pydantic import BaseModel, ConfigDict, Field
+from pydub import AudioSegment
+from pypdf import PdfReader
 
+from prompts import CAPTION_PROMPT, CLEANER_PROMPT
+from qwen import generate_audio
 
 reader = PdfReader("inkheart_RuLit_Me_789272.pdf")
 
-CLEANER_PROMPT_PROMPT = """
-You perform a clean-up work for a PDF scanning project. You will be given
-raw character data. Your job is to convert it to a valid JSONL-sequence formatted
-like this:
+class UncommonWord(BaseModel):
+    source: str
+    target: str
 
-```
-{ "type": "title", "content": "INKHEART "}
-{ "type": "author", "content": "CORNELIA FUNKE" }
-{ "type": "chapterName", "content": "A STRANGER IN THE NIGHT" }
-{ "type": "sentence", "content": "The moon shone in the rocking horse's eye, and in the \"mouse's eye\", too, when Tolly fetched it out from
-under his pillow to see." }
-{ "type": "incompleteSentence", "content": "I heard him say that" }
-```
+class SentencePair(BaseModel):
+    # Allows validation using both the Python field name and the JSON alias
+    model_config = ConfigDict(populate_by_name=True)
 
-Only output text that could be typed as "title", "author", "chapterName", or "sentence".
-You MUST ignore the table of contents, the copyright information and the likes: only the core literature text.
-If a sentence ends abruptly at the end of the page, mark it as "incompleteSentence".
+    source: str
+    target: str
+    uncommon_words: list[UncommonWord] | None = Field(
+        default=None,
+        alias="uncommonWords"
+    )
 
-You must ONLY output the JSONL text, with no ``` marks or any other content.
+class TranslationOutput(BaseModel):
+    sentences: list[SentencePair]
 
-One "sentence" object MUST include only one sentence.
-- This is GOOD: `{ "type": "sentence", "content": "A cat sat on the mat." }`
-- This is UNACCEPTABLE: `{ "type": "sentence", "content": "A cat sat on the mat. What a great cat!" }`
+def message_content_from(
+    llm_response: ModelResponse | CustomStreamWrapper
+) -> str | None:
+    match llm_response:
+        case ModelResponse(choices=choices):
+            return choices[0].message.content
+        case CustomStreamWrapper():
+            return None
 
-The exception is dialog, which should include a narrator's speech after the quotation mark closes:
-- `{ "type": "sentence", "content": "\"You're not here forever," he warned me." }`
-"""
 def process_book():
     with open("out.jsonl", "w") as out:
         page_number = 0
@@ -52,7 +58,7 @@ def process_book():
                 api_key="not-needed",
                 messages=[{
                     "role": "system",
-                    "content": SYSTEM_PROMPT
+                    "content": CLEANER_PROMPT,
                 }, {
                     "role": "user",
                     "content": reduce(
@@ -63,21 +69,18 @@ def process_book():
                     )
                 }]
             )
-            out.write(response.choices[0].message.content)
+            content = message_content_from(llm_response=response)
+            if content:
+                out.write(content)
+            else:
+                print(
+                    "WARNING: empty content when processing pages "
+                    f"{page_number}:{page_number+batch_size}"
+                )
+
             page_number += batch_size
-        print(f"Done writing.")
+    print("Done writing.")
 
-def generate_speech(text: str, filename: str):
-    data = json.dumps({
-        "text": text,
-        "instruct": "female, low pitch, british accent"
-    }).encode("utf-8")
-
-    urlretrieve(
-        "http://localhost:8900/generate-audio",
-        filename=filename,
-        data=data,
-    )
 
 def read_jsonl(filename):
     with open(filename) as jsonl:
@@ -88,13 +91,67 @@ def read_jsonl(filename):
 
         return objects
 
+def generate_sentence():
+    sentences = list(islice((x for x in read_jsonl("out.jsonl") if x["type"] == "sentence"), 5))
 
-sentences = list(islice((x for x in read_jsonl("out.jsonl") if x["type"] == "sentence"), 5))
-sentences
-for (i, sentence) in enumerate(sentences):
-    generate_speech(sentence["content"], f"sentence-{i}.wav")
+    # for (i, sentence) in enumerate(sentences):
+    #     generate_speech(sentence["content"], f"sentence-{i}.wav")
 
-if __name__ == "__main__":
-    process_book()
+    response = litellm.completion(
+        model="openai/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M",
+        api_base="http://localhost:8080/v1",
+        api_key="not-needed",
+        temperature=0.0,
+        messages=[{
+            "role": "system",
+            "content": CAPTION_PROMPT.format(
+                source_language="English",
+                target_language="Russian",
+            ),
+        }, {
+            "role": "user",
+            "content": f"""
+<context>
+{" ".join([sentence["content"] for sentence in sentences])}
+</context>
 
-# OmniVoice
+<target>
+{sentences[3]["content"]}
+</target>
+            """
+        }],
+        response_format=TranslationOutput,
+    )
+
+    output = TranslationOutput.model_validate_json(
+        message_content_from(llm_response=response) or ""
+    )
+    translation_pairs: list[str] = []
+    for sentence in output.sentences:
+        translation_pairs.append(f"{sentence.source} --- {sentence.target}")
+        for word in sentence.uncommon_words or []:
+            translation_pairs.append(f"{word.source} --- {word.target}")
+
+    total = AudioSegment.empty()
+    for i, pair in enumerate(translation_pairs):
+        print(f"Generating speech for pair: {pair}")
+        segment = generate_audio(pair, "Speak calmly with neutral emotion.")
+        total += segment
+
+    export_filename = "wowsuper.mp3"
+    print(f"Writing to {export_filename}", end="...")
+    total.export(export_filename, format="mp3")
+    print("done.")
+
+def ohman():
+    generate_sentence()
+
+    segments = [AudioSegment.from_wav(filename) for filename in glob("output/pair-*.wav")]
+    total = AudioSegment.empty()
+    for segment in segments:
+        total += segment
+
+    total.export("wow.mp3", format="mp3")
+
+# if __name__ == "__main__":
+#     generate_sentence()
