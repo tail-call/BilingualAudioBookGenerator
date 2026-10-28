@@ -1,10 +1,7 @@
-import json
 from datetime import datetime
 from functools import reduce
 from glob import glob
 from itertools import islice
-from typing import Literal
-from urllib.request import urlretrieve
 
 import litellm
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
@@ -15,8 +12,8 @@ from pypdf import PdfReader
 
 from prompts import CAPTION_PROMPT, CLEANER_PROMPT
 from qwen import generate_audio
+from util import read_jsonl
 
-reader = PdfReader("inkheart_RuLit_Me_789272.pdf")
 
 class UncommonWord(BaseModel):
     source: str
@@ -46,6 +43,9 @@ def message_content_from(
             return None
 
 def process_book():
+    "inkheart_RuLit_Me_789272.pdf"
+    reader = PdfReader("deepwork.pdf")
+
     with open("out.jsonl", "w") as out:
         page_number = 0
         batch_size = 5
@@ -81,15 +81,6 @@ def process_book():
             page_number += batch_size
     print("Done writing.")
 
-
-def read_jsonl(filename):
-    with open(filename) as jsonl:
-        lines: list[str] = jsonl.readlines()
-        objects = []
-        for (i, line) in enumerate(lines):
-            objects.append(json.loads(line))
-
-        return objects
 
 def generate_sentence():
     sentences = list(islice((x for x in read_jsonl("out.jsonl") if x["type"] == "sentence"), 5))
@@ -153,5 +144,5 @@ def ohman():
 
     total.export("wow.mp3", format="mp3")
 
-# if __name__ == "__main__":
-#     generate_sentence()
+if __name__ == "__main__":
+    process_book()
