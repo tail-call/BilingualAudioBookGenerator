@@ -1,7 +1,10 @@
+import math
 from datetime import datetime
 from functools import reduce
 from glob import glob
 from itertools import islice
+import httpx
+import json
 
 import litellm
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
@@ -11,7 +14,6 @@ from pydub import AudioSegment
 from pypdf import PdfReader
 
 from prompts import CAPTION_PROMPT, CLEANER_PROMPT
-from qwen import generate_audio
 from util import read_jsonl
 
 
@@ -33,6 +35,20 @@ class SentencePair(BaseModel):
 class TranslationOutput(BaseModel):
     sentences: list[SentencePair]
 
+
+def batch_indices(items_length: int, i: int, batch_size: int) -> range:
+    assert batch_size <= items_length
+    assert i >= 0
+    assert i < items_length
+    if i < batch_size / 2:
+        return range(0, batch_size)
+    elif i >= items_length - batch_size / 2:
+        return range(items_length - batch_size, items_length)
+    else:
+        start = math.ceil(i - batch_size / 2)
+        return range(start, start + batch_size)
+
+
 def message_content_from(
     llm_response: ModelResponse | CustomStreamWrapper
 ) -> str | None:
@@ -42,16 +58,21 @@ def message_content_from(
         case CustomStreamWrapper():
             return None
 
-def process_book():
-    "inkheart_RuLit_Me_789272.pdf"
-    reader = PdfReader("deepwork.pdf")
+def time_now() -> str:
+    return datetime.now().strftime("%H:%M:%S")
 
-    with open("out.jsonl", "w") as out:
+
+def extract_sentences(
+    in_filename: str,
+    out_filename: str,
+    batch_size: int = 5,
+):
+    reader = PdfReader(in_filename)
+
+    with open(out_filename, "w") as out:
         page_number = 0
-        batch_size = 5
         while True:
-            time = datetime.now().strftime("%H:%M:%S")
-            print(f"{time} Working with pages {page_number}..<{page_number + batch_size}")
+            print(f"{time_now()} Working with pages {page_number}..<{page_number + batch_size}")
             response = litellm.completion(
                 model="openai/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M",
                 api_base="http://localhost:8080/v1",
@@ -80,6 +101,45 @@ def process_book():
 
             page_number += batch_size
     print("Done writing.")
+
+
+def generate_annotations(in_filename: str, out_filename: str):
+    sentences = [x for x in read_jsonl(in_filename) if x["type"] == "sentence"]
+    with open(out_filename, "w") as file:
+        for (i, sentence) in enumerate(sentences):
+            print("")
+            print(f"{time_now()} Working with sentence {i+1}/{len(sentences)}")
+            context = [sentences[i] for i in batch_indices(len(sentences), 8, 5)]
+            # response = print(dict(
+            response = litellm.completion(
+                model="openai/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M",
+                api_base="http://localhost:8080/v1",
+                api_key="not-needed",
+                temperature=0.0,
+                reasoning_effort="none",
+                allowed_openai_params=['reasoning_effort'],
+                messages=[{
+                    "role": "system",
+                    "content": CAPTION_PROMPT.format(
+                        source_language="English",
+                        target_language="Russian",
+                    ),
+                }, {
+                    "role": "user",
+                    "content": f"""
+            <context>
+            {" ".join([sentence["content"] for sentence in context])}
+            </context>
+
+            <target>
+            {sentence["content"]}
+            </target>
+                    """
+                }],
+                response_format=TranslationOutput,
+            )
+            content = message_content_from(response) or "// No content //"
+            file.write(content + "\n")
 
 
 def generate_sentence():
@@ -144,5 +204,66 @@ def ohman():
 
     total.export("wow.mp3", format="mp3")
 
+
+def generate_audio(text, lang):
+    print(f"Generating audio ({lang}): {text}")
+    try:
+        BASE_URL = "http://localhost:8919"
+
+        response = httpx.post(
+            BASE_URL + "/v1/audio/speech",
+            content=json.dumps({
+                'model': 'supertonic-3',
+                'input': text,
+                'language': lang
+            })
+        )
+
+        return AudioSegment(response.content)
+    except Exception as e:
+        print("!!! EXCEPTION", e)
+        return AudioSegment.from_file("error.flac")
+
+
+def generate_tts(in_filename: str):
+    from pydub import AudioSegment
+    import json
+
+    with open(in_filename) as f:
+        data = json.load(f)
+
+    annotated_sentences = [
+        TranslationOutput.model_validate(datum) for datum in data
+    ] 
+
+    source_lang = "en"
+    target_lang = "ru"
+
+    seq = annotated_sentences
+    for i, annotated_sentence in enumerate(seq):
+        export_filename = f"output/gputonic-{i:05d}.mp3"
+        print(f"# {time_now()} Sentence {i+1}/{len(seq)}")
+
+        total = AudioSegment.empty()
+        for sentence in annotated_sentence.sentences:
+            total += generate_audio(sentence.source, source_lang)
+            total += AudioSegment.silent(duration=200)
+            print(f"Generating audio: {(sentence.target, target_lang)}")
+            total += generate_audio(sentence.target, target_lang)
+            for word in sentence.uncommon_words or []:
+                total += AudioSegment.silent(duration=200)
+                print(f"Generating audio: {(word.source, source_lang)}")
+                total += generate_audio(word.source, source_lang)
+                print(f"Generating audio: {(word.target, target_lang)}")
+                total += generate_audio(word.target, target_lang)
+            total += AudioSegment.silent(duration=400)
+
+        total.export(export_filename, format="mp3")
+        print(f"Written to {export_filename}")
+
+
 if __name__ == "__main__":
-    process_book()
+    "inkheart_RuLit_Me_789272.pdf"
+    extract_sentences("deepwork.pdf", "deepwork-sentences.jsonl")
+    generate_annotations("deepwork-sentences.jsonl", "deepwork-annotated.jsonl")
+    generate_tts("deepwork-annotated.jsonl")

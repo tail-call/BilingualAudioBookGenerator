@@ -2,16 +2,44 @@
 ## BUGS
 
 - [ ] out.jsonl producer sometimes glues two JSON objects on a single line
+- [ ] Had a guy like this:
+
+```
+# 23:56:24 Sentence 1632/2791
+Written to output/gputonic-1631.mp3
+```
+It was empty. Produced by this object:
+
+```
+  {
+    "sentences": []
+  },
+```
+
+Which was generated from this line:
+
+```
+{ "type": "sentence", "content": "[emphasis mine]" }
+```
+
+Gotta 
 
 ## IDEAS
 
 - [ ] Use the words frequency dictionary to estimate uncommon words instead of trying to predict them with an LLM.
 - [ ] Use a simpler NLP model for sentence extraction.
+- [ ] Propose exercises after each chapter
 
 
 
 - https://github.com/Den4ikAI/ruaccent
 - https://huggingface.co/siriusfreak/qwen3-tts-12hz-1.7b-ru-stress-cf
+
+## Concat files in ffmpeg
+
+```
+ffmpeg -f concat -safe 0 -i filelist.txt -c copy deepwork.mp3
+```
 
 
 ## Sloppio
