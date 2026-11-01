@@ -13,3 +13,10 @@ wheels/
 output/*.mp3
 output.supertonic/*.mp3
 output.qwen3tts/*.mp3
+
+# PDF source files
+pdf/*.pdf
+
+# JSONL/JSON scratchpad
+scratch/*.jsonl
+scratch/*.json

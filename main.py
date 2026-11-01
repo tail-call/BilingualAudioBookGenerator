@@ -1,11 +1,11 @@
+import json
 import math
 from datetime import datetime
 from functools import reduce
 from glob import glob
 from itertools import islice
-import httpx
-import json
 
+import httpx
 import litellm
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 from litellm.types.utils import ModelResponse
@@ -103,14 +103,20 @@ def extract_sentences(
     print("Done writing.")
 
 
-def generate_annotations(in_filename: str, out_filename: str):
+def generate_annotations(
+    in_filename: str,
+    out_filename: str,
+    source_language = "English",
+    target_language = "Russian",
+):
+
+    # XXX: This function doesn't produce a valid JSONL as the JSONs it generates
+    # span multiple lines! What a pity
     sentences = [x for x in read_jsonl(in_filename) if x["type"] == "sentence"]
     with open(out_filename, "w") as file:
         for (i, sentence) in enumerate(sentences):
-            print("")
             print(f"{time_now()} Working with sentence {i+1}/{len(sentences)}")
-            context = [sentences[i] for i in batch_indices(len(sentences), 8, 5)]
-            # response = print(dict(
+            context = [sentences[j] for j in batch_indices(len(sentences), i, 5)]
             response = litellm.completion(
                 model="openai/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M",
                 api_base="http://localhost:8080/v1",
@@ -121,8 +127,8 @@ def generate_annotations(in_filename: str, out_filename: str):
                 messages=[{
                     "role": "system",
                     "content": CAPTION_PROMPT.format(
-                        source_language="English",
-                        target_language="Russian",
+                        source_language=source_language,
+                        target_language=target_language,
                     ),
                 }, {
                     "role": "user",
@@ -226,15 +232,12 @@ def generate_audio(text, lang):
 
 
 def generate_tts(in_filename: str):
-    from pydub import AudioSegment
-    import json
-
     with open(in_filename) as f:
         data = json.load(f)
 
     annotated_sentences = [
         TranslationOutput.model_validate(datum) for datum in data
-    ] 
+    ]
 
     source_lang = "en"
     target_lang = "ru"
@@ -263,7 +266,6 @@ def generate_tts(in_filename: str):
 
 
 if __name__ == "__main__":
-    "inkheart_RuLit_Me_789272.pdf"
-    extract_sentences("deepwork.pdf", "deepwork-sentences.jsonl")
-    generate_annotations("deepwork-sentences.jsonl", "deepwork-annotated.jsonl")
-    generate_tts("deepwork-annotated.jsonl")
+    # extract_sentences("pdf/deepwork.pdf", "scratch/deepwork.jsonl")
+    generate_annotations("scratch/deepwork.jsonl", "scratch/deepwork-annotated.json")
+    generate_tts("scratch/deepwork-annotated.json")
