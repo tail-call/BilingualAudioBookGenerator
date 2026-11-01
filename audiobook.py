@@ -78,6 +78,9 @@ def extract_sentences(
                 model="openai/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M",
                 api_base="http://localhost:8080/v1",
                 api_key="not-needed",
+                temperature=0.0,
+                reasoning_effort="none",
+                allowed_openai_params=['reasoning_effort'],
                 messages=[{
                     "role": "system",
                     "content": CLEANER_PROMPT,
@@ -267,6 +270,6 @@ def generate_tts(in_filename: str):
 
 
 if __name__ == "__main__":
-    # extract_sentences("pdf/deepwork.pdf", "scratch/deepwork.jsonl")
+    extract_sentences("pdf/deepwork.pdf", "scratch/deepwork.jsonl")
     generate_annotations("scratch/deepwork.jsonl", "scratch/deepwork-annotated.json")
     generate_tts("scratch/deepwork-annotated.json")

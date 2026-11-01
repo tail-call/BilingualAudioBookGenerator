@@ -1,3 +1,8 @@
+# BookAudio
+
+For Zuri
+
+uv run uvicorn app:app --host 0.0.0.0 --port 8100
 
 ## BUGS
 
@@ -27,6 +32,8 @@ Gotta gotta gotta do something I guess
 ## TASKS
 
 - [ ] Stress marks
+- [ ] Backend
+- [ ] Langfuse thing
 - [ ] Extract sentences using an NLP model?
 - [ ] Deduplicate keywords
 - [ ] Rewrite numbers as words
