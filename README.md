@@ -1,7 +1,7 @@
 
 ## BUGS
 
-- [ ] out.jsonl producer sometimes glues two JSON objects on a single line
+- [ ] Sentencizer producer sometimes glues two JSON objects on a single line
 - [ ] Had a guy like this:
 
 ```
@@ -22,7 +22,18 @@ Which was generated from this line:
 { "type": "sentence", "content": "[emphasis mine]" }
 ```
 
-Gotta 
+Gotta gotta gotta do something I guess
+
+## TASKS
+
+- [ ] Stress marks
+- [ ] Extract sentences using an NLP model?
+- [ ] Deduplicate keywords
+- [ ] Rewrite numbers as words
+- [ ] Try prefixing small sentences with dot
+- [ ] Chapter names are missing in the annotated text
+- [ ] Process sentences where ['source'] == ['target']
+- [ ] Replace signs (+, -, =) with words
 
 ## IDEAS
 

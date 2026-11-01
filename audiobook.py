@@ -4,6 +4,7 @@ from datetime import datetime
 from functools import reduce
 from glob import glob
 from itertools import islice
+from typing import Literal
 
 import httpx
 import litellm
@@ -211,7 +212,7 @@ def ohman():
     total.export("wow.mp3", format="mp3")
 
 
-def generate_audio(text, lang):
+def generate_audio(text, lang: Literal["ru", "en"]):
     print(f"Generating audio ({lang}): {text}")
     try:
         BASE_URL = "http://localhost:8919"
