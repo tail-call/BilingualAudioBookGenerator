@@ -1,44 +1,44 @@
-import json
+import asyncio
+import io
 import math
-from datetime import datetime
-from functools import reduce
+import os
+from pathlib import Path
 from typing import Literal
 
 import httpx
-import litellm
-from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
-from litellm.types.utils import ModelResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pydub import AudioSegment
-from pypdf import PdfReader
 
-from prompts import CAPTION_PROMPT, CLEANER_PROMPT
-from util import read_jsonl
+LLM_API_BASE = os.getenv("LLM_API_BASE", "http://localhost:8080/v1")
+LLM_MODEL = os.getenv(
+    "LLM_MODEL", "openai/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M"
+)
+TTS_BASE_URL = os.getenv("TTS_BASE_URL", "http://localhost:8919")
 
 
 class UncommonWord(BaseModel):
     source: str
     target: str
 
+
 class SentencePair(BaseModel):
-    # Allows validation using both the Python field name and the JSON alias
     model_config = ConfigDict(populate_by_name=True)
 
     source: str
     target: str
     uncommon_words: list[UncommonWord] | None = Field(
-        default=None,
-        alias="uncommonWords"
+        default=None, alias="uncommonWords"
     )
+
 
 class TranslationOutput(BaseModel):
     sentences: list[SentencePair]
 
 
-def batch_indices(items_length: int, i: int, batch_size: int) -> range:
-    assert batch_size <= items_length
-    assert i >= 0
-    assert i < items_length
+def batch_indices(items_length: int, i: int, batch_size: int = 5) -> range:
+    """Safe batch index context calculation."""
+    if items_length <= batch_size:
+        return range(items_length)
     if i < batch_size / 2:
         return range(batch_size)
     elif i >= items_length - batch_size / 2:
@@ -48,163 +48,78 @@ def batch_indices(items_length: int, i: int, batch_size: int) -> range:
         return range(start, start + batch_size)
 
 
-def message_content_from(
-    llm_response: ModelResponse | CustomStreamWrapper
-) -> str | None:
-    match llm_response:
-        case ModelResponse(choices=choices):
-            return choices[0].message.content
-        case CustomStreamWrapper():
-            return None
-
-def time_now() -> str:
-    return datetime.now().strftime("%H:%M:%S")
-
-
-def extract_sentences(
-    in_filename: str,
-    out_filename: str,
-    batch_size: int = 5,
-):
-    reader = PdfReader(in_filename)
-
-    with open(out_filename, "w") as out:
-        page_number = 0
-        while True:
-            print(f"{time_now()} Working with pages {page_number}..<{page_number + batch_size}")
-            response = litellm.completion(
-                model="openai/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M",
-                api_base="http://localhost:8080/v1",
-                api_key="not-needed",
-                temperature=0.0,
-                reasoning_effort="none",
-                allowed_openai_params=['reasoning_effort'],
-                messages=[{
-                    "role": "system",
-                    "content": CLEANER_PROMPT,
-                }, {
-                    "role": "user",
-                    "content": reduce(
-                        lambda a, b: a + b,
-                        (page.extract_text() for page in reader.pages[
-                            page_number:page_number+batch_size
-                        ])
-                    )
-                }]
-            )
-            content = message_content_from(llm_response=response)
-            if content:
-                out.write(content)
-            else:
-                print(
-                    "WARNING: empty content when processing pages "
-                    f"{page_number}:{page_number+batch_size}"
-                )
-
-            page_number += batch_size
-    print("Done writing.")
+async def generate_audio_clip(
+    client: httpx.AsyncClient, text: str, lang: Literal["ru", "en"]
+) -> AudioSegment:
+    """Async call to the TTS engine."""
+    resp = await client.post(
+        f"{TTS_BASE_URL}/v1/audio/speech",
+        json={"model": "supertonic-3", "input": text, "language": lang},
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+    # Decode audio in worker thread to prevent event-loop blocking
+    return await asyncio.to_thread(AudioSegment.from_file, io.BytesIO(resp.content))
 
 
-def generate_annotations(
-    in_filename: str,
-    out_filename: str,
-    source_language = "English",
-    target_language = "Russian",
-):
+async def render_sentence_audio(
+    translation_dict: dict, export_path: Path
+) -> None:
+    """Generate and concatenate speech for a single annotated sentence."""
+    export_path.parent.mkdir(parents=True, exist_ok=True)
+    translation = TranslationOutput.model_validate(translation_dict)
 
-    # XXX: This function doesn't produce a valid JSONL as the JSONs it generates
-    # span multiple lines! What a pity
-    sentences = [x for x in read_jsonl(in_filename) if x["type"] == "sentence"]
-    with open(out_filename, "w") as file:
-        for (i, sentence) in enumerate(sentences):
-            print(f"{time_now()} Working with sentence {i+1}/{len(sentences)}")
-            context = [sentences[j] for j in batch_indices(len(sentences), i, 5)]
-            response = litellm.completion(
-                model="openai/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M",
-                api_base="http://localhost:8080/v1",
-                api_key="not-needed",
-                temperature=0.0,
-                reasoning_effort="none",
-                allowed_openai_params=['reasoning_effort'],
-                messages=[{
-                    "role": "system",
-                    "content": CAPTION_PROMPT.format(
-                        source_language=source_language,
-                        target_language=target_language,
-                    ),
-                }, {
-                    "role": "user",
-                    "content": f"""
-            <context>
-            {" ".join([sentence["content"] for sentence in context])}
-            </context>
-
-            <target>
-            {sentence["content"]}
-            </target>
-                    """
-                }],
-                response_format=TranslationOutput,
-            )
-            content = message_content_from(response) or "// No content //"
-            file.write(content + "\n")
-
-
-def generate_audio(text, lang: Literal["ru", "en"]):
-    print(f"Generating audio ({lang}): {text}")
-    try:
-        BASE_URL = "http://localhost:8919"
-
-        response = httpx.post(
-            BASE_URL + "/v1/audio/speech",
-            content=json.dumps({
-                'model': 'supertonic-3',
-                'input': text,
-                'language': lang
-            })
-        )
-
-        return AudioSegment(response.content)
-    except Exception as e:
-        print("!!! EXCEPTION", e)
-        return AudioSegment.from_file("error.flac")
-
-
-def generate_tts(in_filename: str):
-    with open(in_filename) as f:
-        data = json.load(f)
-
-    annotated_sentences = [
-        TranslationOutput.model_validate(datum) for datum in data
-    ]
-
-    source_lang = "en"
-    target_lang = "ru"
-
-    seq = annotated_sentences
-    for i, annotated_sentence in enumerate(seq):
-        export_filename = f"output/gputonic-{i:05d}.mp3"
-        print(f"# {time_now()} Sentence {i+1}/{len(seq)}")
-
+    async with httpx.AsyncClient() as client:
         total = AudioSegment.empty()
-        for sentence in annotated_sentence.sentences:
-            total += generate_audio(sentence.source, source_lang)
+
+        for sentence in translation.sentences:
+            src_audio = await generate_audio_clip(client, sentence.source, "en")
+            total += src_audio
             total += AudioSegment.silent(duration=200)
-            print(f"Generating audio: {(sentence.target, target_lang)}")
-            total += generate_audio(sentence.target, target_lang)
+
+            tgt_audio = await generate_audio_clip(client, sentence.target, "ru")
+            total += tgt_audio
+
             for word in sentence.uncommon_words or []:
                 total += AudioSegment.silent(duration=200)
-                print(f"Generating audio: {(word.source, source_lang)}")
-                total += generate_audio(word.source, source_lang)
-                print(f"Generating audio: {(word.target, target_lang)}")
-                total += generate_audio(word.target, target_lang)
+                total += await generate_audio_clip(client, word.source, "en")
+                total += await generate_audio_clip(client, word.target, "ru")
+
             total += AudioSegment.silent(duration=400)
 
-        total.export(export_filename, format="mp3")
-        print(f"Written to {export_filename}")
+        # Export audio segment to disk asynchronously
+        await asyncio.to_thread(total.export, str(export_path), format="mp3")
 
 
-if __name__ == "__main__":
-    extract_sentences("pdf/deepwork.pdf", "scratch/deepwork.jsonl")
-    generate_annotations("scratch/deepwork.jsonl", "scratch/deepwork-annotated.json")
-    generate_tts("scratch/deepwork-annotated.json")
+async def concat_files_with_ffmpeg(
+    final_destination: Path, part_files: list[Path]
+) -> None:
+    """Glues part files using ffmpeg concat demuxer."""
+    final_destination.parent.mkdir(parents=True, exist_ok=True)
+
+    manifest_file = final_destination.with_suffix(".txt")
+    with open(manifest_file, "w") as f:
+        for p in part_files:
+            f.write(f"file '{p.resolve()}'\n")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(manifest_file),
+            "-c",
+            "copy",
+            str(final_destination),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"FFmpeg failed with code {proc.returncode}: {stderr.decode()}")
+    finally:
+        manifest_file.unlink(missing_ok=True)

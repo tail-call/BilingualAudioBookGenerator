@@ -1,8 +1,38 @@
 # BookAudio
 
+Stack: llama.cpp, audio.cpp, FastAPI, litellm, SQLAlchemy, PostgreSQL
+
 For Zuri
 
+Run backend:
+
+```shell
 uv run uvicorn app:app --host 0.0.0.0 --port 8100
+```
+
+## Adding a user and a database to Postgres
+
+```sql
+CREATE USER bookaudio_app WITH ENCRYPTED PASSWORD 'strong_random_secret';
+CREATE DATABASE bookaudio;
+GRANT CONNECT ON DATABASE bookaudio TO bookaudio_app;
+
+GRANT ALL PRIVILEGES ON DATABASE bookaudio TO bookaudio_app;
+\c bookaudio
+GRANT ALL ON SCHEMA public TO bookaudio_app;
+```
+
+To obtain a `'strong_random_secret'`, try using this command:
+
+```shell
+openssl rand -hex 32
+```
+
+If you ever need to change password:
+
+```sql
+ALTER USER bookaudio_app WITH PASSWORD 'new_strong_random_secret';
+```
 
 ## BUGS
 
@@ -31,16 +61,18 @@ Gotta gotta gotta do something I guess
 
 ## TASKS
 
-- [ ] Stress marks
-- [ ] Backend
+- [ ] Detect that llama.cpp and audio.cpp are running.
 - [ ] Langfuse thing
-- [ ] Extract sentences using an NLP model?
-- [ ] Deduplicate keywords
-- [ ] Rewrite numbers as words
 - [ ] Try prefixing small sentences with dot
 - [ ] Chapter names are missing in the annotated text
-- [ ] Process sentences where ['source'] == ['target']
+- [ ] Rewrite numbers as words
 - [ ] Replace signs (+, -, =) with words
+- [ ] Deduplicate keywords
+- [ ] Process sentences where ['source'] == ['target']
+- [ ] Extract sentences using an NLP model?
+- [ ] Stress marks
+- [ ] vLLM? SGLang?
+- [x] Backend
 
 ## IDEAS
 
@@ -60,36 +92,8 @@ ffmpeg -f concat -safe 0 -i filelist.txt -c copy deepwork.mp3
 ```
 
 
-## Sloppio
-1. Разделение голосов (Два разных движка TTS)
+## AI Usage Disclaimer
 
-Ни в коем случае нельзя начитывать оригинал и перевод одним голосом.
-• Иностранный текст должен звучать максимально качественно, желательно использовать современные нейросети (например, ElevenLabs, OpenAI TTS или Яндекс VoiceKit) со спокойным, размеренным тембром носителя языка.
-• Русский перевод должен зачитывать другой голос — контрастный по гендеру (например, иностранный — мужской, русский — женский) или просто звучать как «голосет за кадром» (более сухой, менее эмоциональный).
-
-2. Аудиоэффекты как «визуальные скобки»
-
-В тексте Франка перевод выделен скобками. В аудио роль скобок должны играть звуковые фильтры:
-• Приглушение (Low-pass filter): Накладывайте на русский голос легкий эффект «рации» или телефона, либо убирайте высокие частоты. Мозг мгновенно поймет: «Так, это пошла подсказка, фоновый слой».
-• Громкость: Русский перевод должен быть тише оригинала примерно на 20–30%.
-
-3. Алгоритм склейки (Тайминги и Паузы)
-
-Просто склеить фразы встык нельзя. Нужна правильная разметка пауз (программно это делается через добавление тишины или теги [pause] / <break time="..."> в SSML):
-• Отрезок оригинала \(\rightarrow \) Пауза 0.3 сек \(\rightarrow \) Русский перевод \(\rightarrow \) Пауза 0.8 сек (чтобы мозг переварил) \(\rightarrow \) Следующий отрезок.
-
-4. Лучший формат для аудио: Метод «Сэндвича»
-
-Вместо того чтобы переводить каждое слово внутри предложения (как в книге), для аудио лучше использовать блочную структуру. Парсить текст из файлов книг Ильи Франка нужно так, чтобы на выходе аудиофайл строился по схеме:
-1. Абзац на иностранном с переводом по предложениям (Иностранный \(\rightarrow \) Русский перевод \(\rightarrow \) Иностранный \(\rightarrow \) Русский перевод). Это этап разбора.
-2. Короткая музыкальная отбивка (например, мягкий клик или секундный эмбиент).
-3. Тот же абзац целиком ТОЛЬКО на иностранном языке. Это этап закрепления на слух.
-
-Как это реализовать технически (набросок для разработчика)
-
-Если ваша девушка пишет код (например, на Python), скрипт должен:
-1. Регулярными выражениями (re) разделять текст на чистый иностранный и куски в скобках.
-2. Отправлять иностранные куски в API TTS с параметрами voice_A.
-3. Отправлять русские куски в API TTS с параметрами voice_B.
-4. С помощью библиотеки pydub (или ffmpeg) собирать их в один трек, программно занижая громкость и добавляя миллисекунды тишины между ними.
-Подсказать, на каком языке программирования ваша девушка планирует писать этот генератор? Я могу набросать готовый пример кода для разделения текста и генерации правильных аудиодорожек.
+The following large language models were used to assist with code generation:
+- Qwen3.6-35B-A3B
+- Gemini 3.8 Flash

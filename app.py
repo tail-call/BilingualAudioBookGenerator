@@ -1,104 +1,54 @@
+import shutil
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from audiobook import (
-    extract_sentences,
-    generate_annotations,
-    generate_tts,
-)
-from jobs import JobManager, JobStatus
+from database import get_db, init_db
+from models import Book, Job, JobStatus, JobType
+from orchestrator import Orchestrator
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "output"
-STATE_FILE = BASE_DIR / ".app_state.json"
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+orchestrator = Orchestrator(BASE_DIR)
 
-def concat_files_with_ffmpeg(final_out: str, output_files: list[Path]):
-    # Use ffmpeg to concat (or just pick the first if single)
-    import subprocess
-    import tempfile
 
-    filelist = Path(tempfile.mktemp(suffix=".txt"))
-    with open(filelist, "w") as f:
-        f.writelines(f"file '{p}'\n" for p in output_files)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize DB schema
+    await init_db()
+    # Start background orchestrator and job resumption
+    await orchestrator.start()
+    yield
+    # Graceful shutdown
+    await orchestrator.stop()
 
-    dest = OUTPUT_DIR / final_out
-    subprocess.run(
-        [
-            "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-            "-i", str(filelist), "-c", "copy", str(dest),
-        ],
-        check=True,
-    )
-    filelist.unlink(missing_ok=True)
-    return dest
 
-async def run_pipeline(job_id: str, pdf_path: Path):
-    """Three-stage pipeline: extract → annotate → generate TTS."""
+app = FastAPI(title="BookAudio Resumable Engine", version="0.2.0", lifespan=lifespan)
 
-    jsonl_out = BASE_DIR / f"scratch_{job_id}.jsonl"
-    annotated_out = BASE_DIR / f"scratch_{job_id}-annotated.json"
-    final_out = f"audiobook_{job_id}.mp3"
 
-    try:
-        # Stage 1: extract sentences
-        job_manager.update_job(job_id, status=JobStatus.PROCESSING, progress=10)
-        extract_sentences(str(pdf_path), str(jsonl_out))
-        job_manager.update_job(job_id, progress=40)
-
-        # Stage 2: generate annotations
-        generate_annotations(str(jsonl_out), str(annotated_out))
-        job_manager.update_job(job_id, progress=70)
-
-        # Stage 3: generate TTS (returns list of files in output/)
-        generate_tts(str(annotated_out))
-
-        # Bundle all output/*.mp3 into a single file
-        output_files = sorted(OUTPUT_DIR.glob("gputonic-*.mp3"))
-        if not output_files:
-            # try older naming
-            output_files = sorted(OUTPUT_DIR.glob("*.mp3"))
-
-        if output_files:
-            dest = concat_files_with_ffmpeg(final_out, output_files)
-
-            job_manager.update_job(
-                job_id,
-                status=JobStatus.DONE,
-                progress=100,
-                output_file=dest.name
-            )
-        else:
-            job_manager.update_job(
-                job_id,
-                status=JobStatus.FAILED,
-                error="No audio files were generated."
-            )
-
-    except Exception as exc:
-        import traceback
-        tb = traceback.format_exc()
-        job_manager.update_job(
-            job_id,
-            status=JobStatus.FAILED, error=str(exc) + str(tb),
-            output_file=None
-        )
+def calculate_progress(book: Book) -> int:
+    if book.status == JobStatus.DONE:
+        return 100
+    if book.status == JobStatus.PENDING:
+        return 0
+    if book.total_sentences == 0:
+        return 10
+    return 10 + int(85 * (book.completed_sentences / book.total_sentences))
 
 
 # ---------------------------------------------------------------------------
-# API endpoints
+# API Endpoints
 # ---------------------------------------------------------------------------
-
-
-app = FastAPI(title="BookAudio", version="0.1.0")
-job_manager = JobManager(STATE_FILE)
 
 
 @app.post("/jobs")
@@ -106,76 +56,123 @@ async def create_job(
     pdf: UploadFile = File(..., description="PDF file to convert"),
     source_language: str = Form("English"),
     target_language: str = Form("Russian"),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Upload a PDF and start the audiobook generation pipeline."""
-
-    # Validate
-    if not pdf.filename or pdf.filename.lower().endswith(".pdf"):
+    """Upload a PDF and register the book."""
+    if not pdf.filename or not pdf.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "Only PDF files are accepted.")
 
-    job_id = uuid.uuid4().hex[:12]
-    pdf_path = UPLOAD_DIR / f"{job_id}_{pdf.filename}"
+    book_id = uuid.uuid4().hex[:12]
+    pdf_path = UPLOAD_DIR / f"{book_id}_{pdf.filename}"
 
     content = await pdf.read()
     pdf_path.write_bytes(content)
 
-    job_manager.add_job(job_id, pdf.filename)
+    book = Book(
+        id=book_id,
+        pdf_filename=pdf.filename,
+        pdf_path=str(pdf_path),
+        source_language=source_language,
+        target_language=target_language,
+        status=JobStatus.PENDING,
+    )
+    db.add(book)
+    await db.commit()
 
     return {
-        "job_id": job_id,
+        "job_id": book_id,
         "status": JobStatus.PENDING,
-        "pdf_filename": pdf.filename
+        "pdf_filename": pdf.filename,
     }
 
 
 @app.post("/jobs/{job_id}/start")
-async def start_job(job_id: str, background_tasks: BackgroundTasks):
-    """Start (or restart) processing a job in the background."""
-    if not job_manager.has_job(job_id):
-        raise HTTPException(404, "Job not found.")
+async def start_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    """Start or resume pipeline processing for a book."""
+    book = await db.get(Book, job_id)
+    if not book:
+        raise HTTPException(404, "Book not found.")
 
-    job = job_manager.job_with_id(job_id)
-    pdf_path = UPLOAD_DIR / f"{job_id}_{job.pdf_filename}"
-    if not pdf_path.exists():
-        raise HTTPException(404, f"PDF file not found: {job.pdf_filename}")
+    # Check existing collector job
+    collector = await db.scalar(
+        select(Job).where(Job.book_id == job_id, Job.job_type == JobType.COLLECTOR)
+    )
 
-    background_tasks.add_task(run_pipeline, job_id, pdf_path)
+    if not collector:
+        collector = Job(
+            id=uuid.uuid4().hex,
+            book_id=book.id,
+            job_type=JobType.COLLECTOR,
+            status=JobStatus.PENDING,
+            payload={"current_page": 0},
+        )
+        db.add(collector)
+
+    book.status = JobStatus.PROCESSING
+    await db.commit()
+
     return {"job_id": job_id, "status": JobStatus.PROCESSING}
 
 
 @app.get("/jobs/{job_id}")
-async def get_job(job_id: str):
-    """Get job status."""
-    if not job_manager.has_job(job_id):
+async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    """Check granular progress and stage."""
+    book = await db.get(Book, job_id)
+    if not book:
         raise HTTPException(404, "Job not found.")
-    return job_manager.job_with_id(job_id)
+
+    return {
+        "id": book.id,
+        "status": book.status,
+        "pdf_filename": book.pdf_filename,
+        "progress": calculate_progress(book),
+        "total_sentences": book.total_sentences,
+        "completed_sentences": book.completed_sentences,
+        "output_file": book.output_file,
+        "error": book.error,
+        "created_at": book.created_at.isoformat(),
+        "updated_at": book.updated_at.isoformat(),
+    }
 
 
 @app.get("/jobs")
-async def list_jobs():
-    """List all jobs."""
-    return job_manager.all_jobs()
+async def list_jobs(db: AsyncSession = Depends(get_db)):
+    """List all registered books."""
+    books = (await db.scalars(select(Book).order_by(Book.created_at.desc()))).all()
+    return [
+        {
+            "id": b.id,
+            "status": b.status,
+            "pdf_filename": b.pdf_filename,
+            "progress": calculate_progress(b),
+            "output_file": b.output_file,
+            "created_at": b.created_at.isoformat(),
+        }
+        for b in books
+    ]
 
 
 @app.delete("/jobs/{job_id}")
-async def delete_job(job_id: str):
-    """Delete a job and its files."""
-    if not job_manager.has_job(job_id):
+async def delete_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    """Delete a book, its database records, and disk files."""
+    book = await db.get(Book, job_id)
+    if not book:
         raise HTTPException(404, "Job not found.")
-    job = job_manager.delete_job_with_id(job_id)
-    # Clean up files
-    for p in [
-        UPLOAD_DIR / f"{job_id}_{job.pdf_filename}",
-        BASE_DIR / f"scratch_{job_id}.jsonl",
-        BASE_DIR / f"scratch_{job_id}-annotated.json",
-    ]:
-        p.unlink(missing_ok=True)
+
+    # Remove upload and output files
+    Path(book.pdf_path).unlink(missing_ok=True)
+    if book.output_file:
+        (OUTPUT_DIR / book.output_file).unlink(missing_ok=True)
+    shutil.rmtree(OUTPUT_DIR / book.id, ignore_errors=True)
+
+    await db.delete(book)
+    await db.commit()
     return {"deleted": job_id}
 
 
 @app.get("/output/{filename}")
 async def get_output(filename: str):
-    """Download a generated audio file."""
+    """Download generated audiobook file."""
     path = OUTPUT_DIR / filename
     if not path.exists():
         raise HTTPException(404, "File not found.")
@@ -189,4 +186,6 @@ async def frontend():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8100, reload=True)
+
+    # uvicorn.run("app:app", host="0.0.0.0", port=8100, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8100)
