@@ -2,8 +2,6 @@ import json
 import math
 from datetime import datetime
 from functools import reduce
-from glob import glob
-from itertools import islice
 from typing import Literal
 
 import httpx
@@ -42,7 +40,7 @@ def batch_indices(items_length: int, i: int, batch_size: int) -> range:
     assert i >= 0
     assert i < items_length
     if i < batch_size / 2:
-        return range(0, batch_size)
+        return range(batch_size)
     elif i >= items_length - batch_size / 2:
         return range(items_length - batch_size, items_length)
     else:
@@ -150,69 +148,6 @@ def generate_annotations(
             )
             content = message_content_from(response) or "// No content //"
             file.write(content + "\n")
-
-
-def generate_sentence():
-    sentences = list(islice((x for x in read_jsonl("out.jsonl") if x["type"] == "sentence"), 5))
-
-    # for (i, sentence) in enumerate(sentences):
-    #     generate_speech(sentence["content"], f"sentence-{i}.wav")
-
-    response = litellm.completion(
-        model="openai/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M",
-        api_base="http://localhost:8080/v1",
-        api_key="not-needed",
-        temperature=0.0,
-        messages=[{
-            "role": "system",
-            "content": CAPTION_PROMPT.format(
-                source_language="English",
-                target_language="Russian",
-            ),
-        }, {
-            "role": "user",
-            "content": f"""
-<context>
-{" ".join([sentence["content"] for sentence in sentences])}
-</context>
-
-<target>
-{sentences[3]["content"]}
-</target>
-            """
-        }],
-        response_format=TranslationOutput,
-    )
-
-    output = TranslationOutput.model_validate_json(
-        message_content_from(llm_response=response) or ""
-    )
-    translation_pairs: list[str] = []
-    for sentence in output.sentences:
-        translation_pairs.append(f"{sentence.source} --- {sentence.target}")
-        for word in sentence.uncommon_words or []:
-            translation_pairs.append(f"{word.source} --- {word.target}")
-
-    total = AudioSegment.empty()
-    for i, pair in enumerate(translation_pairs):
-        print(f"Generating speech for pair: {pair}")
-        segment = generate_audio(pair, "Speak calmly with neutral emotion.")
-        total += segment
-
-    export_filename = "wowsuper.mp3"
-    print(f"Writing to {export_filename}", end="...")
-    total.export(export_filename, format="mp3")
-    print("done.")
-
-def ohman():
-    generate_sentence()
-
-    segments = [AudioSegment.from_wav(filename) for filename in glob("output/pair-*.wav")]
-    total = AudioSegment.empty()
-    for segment in segments:
-        total += segment
-
-    total.export("wow.mp3", format="mp3")
 
 
 def generate_audio(text, lang: Literal["ru", "en"]):
