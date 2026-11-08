@@ -1,0 +1,23 @@
+{
+  "host": "127.0.0.1",
+  "port": 8080,
+  "backend": "cuda",
+  "device": 0,
+  "threads": 1,
+  "lazy_load": true,
+  "models": [
+    {
+      "id": "supertonic-3",
+      "family": "supertonic",
+      "path": "models/Supertonic-3-GGUF/",
+      "task": "tts",
+      "mode": "offline",
+      "load_options": {
+        "language": "english"
+      },
+      "session_options": {
+        "language": "english"
+      }
+    }
+  ]
+}

@@ -7,7 +7,15 @@ For Zuri
 Run backend:
 
 ```shell
-uv run uvicorn app:app --host 0.0.0.0 --port 8100
+uvicorn app:app --host 0.0.0.0 --port 8100
+```
+
+Docker stuff:
+
+```
+docker build -t bookaudio . # Build
+docker run --gpus all -p 8100:8100 bookaudio # Run
+docker run --gpus all -it bookaudio bash # Run bash
 ```
 
 ## Adding a user and a database to Postgres
