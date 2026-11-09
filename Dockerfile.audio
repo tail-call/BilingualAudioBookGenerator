@@ -1,0 +1,20 @@
+FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+    git \
+    cmake \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --branch v0.9.4 https://github.com/0xShug0/audio.cpp /root/audio.cpp \
+    && cd /root/audio.cpp/ \
+    && scripts/build_linux.sh --backend cuda --target audiocpp_cli --target audiocpp_server
+
+WORKDIR /root/audio.cpp
+RUN mkdir -p /root/audio.cpp/models
+COPY server.json .
+COPY run-supertonic.sh .
+RUN chmod +x run-supertonic.sh
+
+ENTRYPOINT ["./run-supertonic.sh"]

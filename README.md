@@ -12,10 +12,12 @@ uvicorn app:app --host 0.0.0.0 --port 8100
 
 Docker stuff:
 
-```
-docker build -t bookaudio . # Build
-docker run --gpus all -p 8100:8100 bookaudio # Run
-docker run --gpus all -it bookaudio bash # Run bash
+```shell
+docker compose up
+# Run bash in app
+docker compose exec app bash 
+# Run bash in app but stronger
+docker compose run --rm --entrypoint bash app
 ```
 
 ## Adding a user and a database to Postgres

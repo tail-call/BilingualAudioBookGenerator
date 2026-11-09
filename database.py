@@ -15,9 +15,7 @@ def die(message: str):
 
 def database_url():
     user = os.getenv("DATABASE_USER") or "bookaudio_app"
-    # password = os.getenv("DATABASE_PASSWORD") or die("DATABASE_PASSWORD environment variable not set")
-    # XXX
-    password = "e9257579581357e6f0c83585f38ad48df7e80a87d6bf9db3ca056710092eb374"
+    password = os.getenv("DATABASE_PASSWORD") or die("DATABASE_PASSWORD environment variable not set")
     host = os.getenv("DATABASE_HOST") or "localhost"
     port = os.getenv("DATABASE_PORT") or 5432
     return (

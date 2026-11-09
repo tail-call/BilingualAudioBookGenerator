@@ -1,0 +1,81 @@
+# Use this anchor (`<<: *enable-gpu-access`) in every service that needs
+# to access GPU
+x-enable-gpu-access: &enable-gpu-access
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-app_db}
+      BOOKAUDIO_APP_PASSWORD: ${DATABASE_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Initialization script
+      # https://hub.docker.com/_/postgres#initialization-scripts
+      - ./db-init.sh:/docker-entrypoint-initdb.d/01-init.sh
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  llama:
+    build:
+      context: .
+      dockerfile: Dockerfile.llama
+    restart: unless-stopped
+    volumes:
+      - ./models:/models
+    ports:
+      - "8080:8080"
+    <<: *enable-gpu-access
+
+  audio:
+    build:
+      context: .
+      dockerfile: Dockerfile.audio
+    restart: unless-stopped
+    volumes:
+      - ./models:/models
+    ports:
+      - "8000:8000"
+    <<: *enable-gpu-access
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    restart: unless-stopped
+    environment:
+      DATABASE_USER: bookaudio_app
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      LLAMA_API_URL: http://llama:8080
+      AUDIO_API_URL: http://audio:8000
+    volumes:
+      - uploads:/root/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      llama:
+        condition: service_started
+      audio:
+        condition: service_started
+    ports:
+      - "8100:8100"
+
+volumes:
+  postgres_data:

@@ -1,0 +1,26 @@
+FROM nvidia/cuda:12.9.1-devel-ubuntu24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y \
+    git \
+    cmake \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --branch v0.9.0 https://github.com/ggml-org/llama.cpp /root/llama.cpp \
+    && ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1 \
+    && mkdir -p /root/llama.cpp/build \
+    && cd /root/llama.cpp/build \
+    && export LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LD_LIBRARY_PATH} \
+    && export LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LIBRARY_PATH} \
+    && cmake .. \
+        -DGGML_CUDA=ON \
+        -DLLAMA_BUILD_TESTS=OFF \
+        -DCMAKE_CUDA_ARCHITECTURES="80;86;89;90" \
+    && make -j$(nproc)
+
+WORKDIR /root/llama.cpp
+COPY run-qwen.sh .
+RUN chmod +x run-qwen.sh
+
+ENTRYPOINT ["./run-qwen.sh"]
