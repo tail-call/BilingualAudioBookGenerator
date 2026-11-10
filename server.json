@@ -1,6 +1,6 @@
 {
   "host": "127.0.0.1",
-  "port": 8080,
+  "port": 8000,
   "backend": "cuda",
   "device": 0,
   "threads": 1,
@@ -9,7 +9,7 @@
     {
       "id": "supertonic-3",
       "family": "supertonic",
-      "path": "models/Supertonic-3-GGUF/",
+      "path": "/root/models/Supertonic-3-GGUF/",
       "task": "tts",
       "mode": "offline",
       "load_options": {

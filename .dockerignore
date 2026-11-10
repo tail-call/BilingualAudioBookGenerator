@@ -3,3 +3,8 @@
 *.md
 .env
 .venv
+models/
+output/
+uploads/
+scratch/
+pdf/

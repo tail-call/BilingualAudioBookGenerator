@@ -19,10 +19,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project
 
 # Now copy the app
-COPY . .
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen
+COPY bookaudio/ bookaudio/
+COPY main.py main.py
+COPY run-app.sh run-app.sh
 
 RUN chmod +x run-app.sh
 CMD ["./run-app.sh"]

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from models import Base
+from bookaudio.models import Base
 
 
 def die(message: str):

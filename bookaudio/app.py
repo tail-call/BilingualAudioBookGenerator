@@ -8,9 +8,9 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import get_db, init_db
-from models import Book, Job, JobStatus, JobType
-from orchestrator import Orchestrator
+from bookaudio.database import get_db, init_db
+from bookaudio.models import Book, Job, JobStatus, JobType
+from bookaudio.orchestrator import Orchestrator
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -184,8 +184,8 @@ async def frontend():
     return FileResponse("index.html")
 
 
-if __name__ == "__main__":
+def main():
     import uvicorn
 
     # uvicorn.run("app:app", host="0.0.0.0", port=8100, reload=True)
-    uvicorn.run("app:app", host="0.0.0.0", port=8100)
+    uvicorn.run("bookaudio.app:app", host="0.0.0.0", port=8100)

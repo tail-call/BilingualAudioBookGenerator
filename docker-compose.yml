@@ -37,7 +37,8 @@ services:
       dockerfile: Dockerfile.llama
     restart: unless-stopped
     volumes:
-      - ./models:/models
+      - ${LLM_GGUF}:/root/models/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
+      - ${MMPROJ_GGUF}:/root/models/mmproj-BF16.gguf
     ports:
       - "8080:8080"
     <<: *enable-gpu-access
@@ -48,7 +49,7 @@ services:
       dockerfile: Dockerfile.audio
     restart: unless-stopped
     volumes:
-      - ./models:/models
+      - ./models:/root/models
     ports:
       - "8000:8000"
     <<: *enable-gpu-access
@@ -66,7 +67,7 @@ services:
       LLAMA_API_URL: http://llama:8080
       AUDIO_API_URL: http://audio:8000
     volumes:
-      - uploads:/root/app/uploads
+      - ./uploads:/root/app/uploads
     depends_on:
       postgres:
         condition: service_healthy

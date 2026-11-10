@@ -10,7 +10,7 @@ import litellm
 from pypdf import PdfReader
 from sqlalchemy import func, select, update
 
-from audiobook import (
+from bookaudio.audiobook import (
     LLM_API_BASE,
     LLM_MODEL,
     TranslationOutput,
@@ -18,9 +18,9 @@ from audiobook import (
     concat_files_with_ffmpeg,
     render_sentence_audio,
 )
-from database import AsyncSessionLocal
-from models import Book, Job, JobStatus, JobType, Sentence
-from prompts import CAPTION_PROMPT, CLEANER_PROMPT
+from bookaudio.database import AsyncSessionLocal
+from bookaudio.models import Book, Job, JobStatus, JobType, Sentence
+from bookaudio.prompts import CAPTION_PROMPT, CLEANER_PROMPT
 
 logger = logging.getLogger("orchestrator")
 

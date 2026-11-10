@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # TTS outputs
-output/*.mp3
+output/**/*.mp3
 output.supertonic/*.mp3
 output.qwen3tts/*.mp3
 
