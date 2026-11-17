@@ -82,11 +82,10 @@ class JobOrchestrator:
                     f"Resumption: Reset {res.rowcount} interrupted in-flight jobs to PENDING."
                 )
 
-    # -------------------------------------------------------------------------
-    # JOB CLAIMING HELPER (PostgreSQL `SKIP LOCKED`)
-    # -------------------------------------------------------------------------
-
     async def _claim_next_job(self, job_type: JobType) -> str | None:
+        """
+        Claims next job using PostgreSQL's `SKIP LOCKED`.
+        """
         async with AsyncSessionLocal() as session, session.begin():
             stmt = (
                 select(Job.id)
