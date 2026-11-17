@@ -1,24 +1,298 @@
 import asyncio
-import json
 import logging
 import traceback
 import uuid
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pypdf import PdfReader
 from sqlalchemy import func, select, update
 
+from bookaudio.database import AsyncSessionLocal
+from bookaudio.models import Book, Job, JobStatus, JobType, Sentence
+from bookaudio.nlp import NLPService
 from bookaudio.tts import (
     concat_files_with_ffmpeg,
     render_sentence_audio,
 )
-from bookaudio.database import AsyncSessionLocal
-from bookaudio.nlp import NLPService, TranslationOutput
-from bookaudio.models import Book, Job, JobStatus, JobType, Sentence
 from bookaudio.util import batch_indices
 
 logger = logging.getLogger("orchestrator")
+
+
+class JobsRepository:
+    def __init__(self, session_factory=AsyncSessionLocal):
+        self.session_factory = session_factory
+
+    async def recover_interrupted_jobs(self) -> int:
+        """Reset any in-flight 'processing' jobs back to 'pending'."""
+        async with self.session_factory() as session, session.begin():
+            stmt = (
+                update(Job)
+                .where(Job.status == JobStatus.PROCESSING)
+                .values(status=JobStatus.PENDING)
+            )
+            res = await session.execute(stmt)
+            return res.rowcount or 0
+
+    async def claim_next_job(self, job_type: JobType) -> str | None:
+        """Claim the next pending job of the given type using SKIP LOCKED."""
+        async with self.session_factory() as session, session.begin():
+            stmt = (
+                select(Job.id)
+                .where(Job.job_type == job_type, Job.status == JobStatus.PENDING)
+                .order_by(Job.sequence_num.asc().nulls_first(), Job.created_at.asc())
+                .limit(1)
+                .with_for_update(skip_locked=True)
+            )
+            job_id = await session.scalar(stmt)
+            if not job_id:
+                return None
+
+            await session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(
+                    status=JobStatus.PROCESSING,
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            return job_id
+
+    async def get_job(self, job_id: str) -> Job | None:
+        async with self.session_factory() as session:
+            return await session.get(Job, job_id)
+
+    async def get_job_with_book(self, job_id: str) -> tuple[Job, Book] | None:
+        async with self.session_factory() as session:
+            job = await session.get(Job, job_id)
+            if not job:
+                return None
+            book = await session.get(Book, job.book_id)
+            if not book:
+                return None
+            return job, book
+
+    async def get_sentence_count(self, book_id: str) -> int:
+        async with self.session_factory() as session:
+            count = await session.scalar(
+                select(func.count(Sentence.id)).where(Sentence.book_id == book_id)
+            )
+            return count or 0
+
+    async def save_collected_sentences_batch(
+        self,
+        job_id: str,
+        book_id: str,
+        sentence_texts: list[str],
+        start_seq: int,
+        next_page: int,
+    ) -> int:
+        async with self.session_factory() as session, session.begin():
+            seq_counter = start_seq
+            for text in sentence_texts:
+                session.add(
+                    Sentence(
+                        book_id=book_id,
+                        sequence_num=seq_counter,
+                        text=text,
+                    )
+                )
+                seq_counter += 1
+
+            await session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(payload={"current_page": next_page})
+            )
+            return seq_counter
+
+    async def get_book_sentences(self, book_id: str) -> list[Sentence]:
+        async with self.session_factory() as session:
+            return list(
+                (
+                    await session.scalars(
+                        select(Sentence)
+                        .where(Sentence.book_id == book_id)
+                        .order_by(Sentence.sequence_num)
+                    )
+                ).all()
+            )
+
+    async def complete_collector_job(
+        self,
+        job_id: str,
+        book_id: str,
+        preprocessor_specs: list[dict],
+        total_sentences: int,
+    ) -> None:
+        async with self.session_factory() as session, session.begin():
+            for spec in preprocessor_specs:
+                session.add(
+                    Job(
+                        id=uuid.uuid4().hex,
+                        book_id=book_id,
+                        job_type=JobType.PREPROCESSOR,
+                        status=JobStatus.PENDING,
+                        sequence_num=spec["sequence_num"],
+                        sentence_id=spec["sentence_id"],
+                        payload=spec["payload"],
+                    )
+                )
+
+            await session.execute(
+                update(Book)
+                .where(Book.id == book_id)
+                .values(total_sentences=total_sentences)
+            )
+            await session.execute(
+                update(Job).where(Job.id == job_id).values(status=JobStatus.DONE)
+            )
+
+    async def complete_preprocessor_job(
+        self,
+        job_id: str,
+        book_id: str,
+        sequence_num: int | None,
+        sentence_id: str | None,
+        translation_data: dict,
+    ) -> None:
+        async with self.session_factory() as session, session.begin():
+            session.add(
+                Job(
+                    id=uuid.uuid4().hex,
+                    book_id=book_id,
+                    job_type=JobType.VOICER,
+                    status=JobStatus.PENDING,
+                    sequence_num=sequence_num,
+                    sentence_id=sentence_id,
+                    payload={"translation_data": translation_data},
+                )
+            )
+            await session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(status=JobStatus.DONE, result=translation_data)
+            )
+
+    async def complete_voicer_job(
+        self, job_id: str, book_id: str, audio_file: str
+    ) -> None:
+        async with self.session_factory() as session, session.begin():
+            await session.execute(
+                update(Job)
+                .where(Job.id == job_id)
+                .values(
+                    status=JobStatus.DONE,
+                    result={"audio_file": audio_file},
+                )
+            )
+
+            done_voicers = await session.scalar(
+                select(func.count(Job.id)).where(
+                    Job.book_id == book_id,
+                    Job.job_type == JobType.VOICER,
+                    Job.status == JobStatus.DONE,
+                )
+            )
+            await session.execute(
+                update(Book)
+                .where(Book.id == book_id)
+                .values(completed_sentences=done_voicers)
+            )
+
+    async def try_spawn_glue_job(self, book_id: str) -> bool:
+        async with self.session_factory() as session, session.begin():
+            book = await session.scalar(
+                select(Book).where(Book.id == book_id).with_for_update()
+            )
+            if not book or book.total_sentences == 0:
+                return False
+
+            uncompleted = await session.scalar(
+                select(func.count(Job.id)).where(
+                    Job.book_id == book_id,
+                    Job.job_type == JobType.VOICER,
+                    Job.status != JobStatus.DONE,
+                )
+            )
+            existing_glue = await session.scalar(
+                select(func.count(Job.id)).where(
+                    Job.book_id == book_id,
+                    Job.job_type == JobType.GLUE,
+                )
+            )
+
+            if uncompleted == 0 and existing_glue == 0:
+                session.add(
+                    Job(
+                        id=uuid.uuid4().hex,
+                        book_id=book_id,
+                        job_type=JobType.GLUE,
+                        status=JobStatus.PENDING,
+                    )
+                )
+                return True
+            return False
+
+    async def get_glue_job_data(
+        self, job_id: str
+    ) -> tuple[Job, Book, list[Job]] | None:
+        async with self.session_factory() as session:
+            job = await session.get(Job, job_id)
+            if not job:
+                return None
+            book = await session.get(Book, job.book_id)
+            if not book:
+                return None
+
+            voicer_jobs = list(
+                (
+                    await session.scalars(
+                        select(Job)
+                        .where(Job.book_id == book.id, Job.job_type == JobType.VOICER)
+                        .order_by(Job.sequence_num)
+                    )
+                ).all()
+            )
+            return job, book, voicer_jobs
+
+    async def complete_glue_job(
+        self, job_id: str, book_id: str, output_filename: str
+    ) -> None:
+        async with self.session_factory() as session, session.begin():
+            await session.execute(
+                update(Job).where(Job.id == job_id).values(status=JobStatus.DONE)
+            )
+            await session.execute(
+                update(Book)
+                .where(Book.id == book_id)
+                .values(
+                    status=JobStatus.DONE,
+                    output_file=output_filename,
+                )
+            )
+
+    async def fail_job(
+        self, job_id: str, error_msg: str, max_retries: int = 3
+    ) -> None:
+        async with self.session_factory() as session, session.begin():
+            job = await session.get(Job, job_id)
+            if not job:
+                return
+
+            job.retry_count += 1
+            if job.retry_count < max_retries:
+                job.status = JobStatus.PENDING
+                job.error = f"Retrying: {error_msg}"
+            else:
+                job.status = JobStatus.FAILED
+                job.error = error_msg
+                await session.execute(
+                    update(Book)
+                    .where(Book.id == job.book_id)
+                    .values(status=JobStatus.FAILED, error=error_msg)
+                )
 
 
 class JobOrchestrator:
@@ -26,11 +300,13 @@ class JobOrchestrator:
         self,
         base_dir: Path,
         nlp_service: NLPService,
+        jobs_repository: JobsRepository,
         max_preprocessor_concurrency: int = 2,
         max_voicer_concurrency: int = 2,
     ):
         self.base_dir = base_dir
         self.nlp_service = nlp_service
+        self.jobs_repository = jobs_repository
         self.output_dir = base_dir / "output"
         self.output_dir.mkdir(exist_ok=True)
 
@@ -60,52 +336,17 @@ class JobOrchestrator:
         await asyncio.gather(*self._worker_tasks, return_exceptions=True)
         logger.info("Orchestrator stopped.")
 
-    # -------------------------------------------------------------------------
-    # RESUMPTION / RECOVERY LOGIC
-    # -------------------------------------------------------------------------
-
     async def recover_interrupted_jobs(self):
         """
-        Primary Goal: allow jobs to resume from where they stopped.
+        Allow jobs to resume from where they stopped.
         Any job that was in 'processing' state when the system was interrupted
         is safely reset to 'pending' to be picked up immediately.
         """
-        async with AsyncSessionLocal() as session, session.begin():
-            stmt = (
-                update(Job)
-                .where(Job.status == JobStatus.PROCESSING)
-                .values(status=JobStatus.PENDING)
+        recovered_count = await self.jobs_repository.recover_interrupted_jobs()
+        if recovered_count > 0:
+            logger.info(
+                f"Resumption: Reset {recovered_count} interrupted in-flight jobs to PENDING."
             )
-            res = await session.execute(stmt)
-            if res.rowcount > 0:
-                logger.info(
-                    f"Resumption: Reset {res.rowcount} interrupted in-flight jobs to PENDING."
-                )
-
-    async def _claim_next_job(self, job_type: JobType) -> str | None:
-        """
-        Claims next job using PostgreSQL's `SKIP LOCKED`.
-        """
-        async with AsyncSessionLocal() as session, session.begin():
-            stmt = (
-                select(Job.id)
-                .where(Job.job_type == job_type, Job.status == JobStatus.PENDING)
-                .order_by(Job.sequence_num.asc().nulls_first(), Job.created_at.asc())
-                .limit(1)
-                .with_for_update(skip_locked=True)
-            )
-            job_id = await session.scalar(stmt)
-            if job_id:
-                await session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(
-                        status=JobStatus.PROCESSING,
-                        updated_at=datetime.now(UTC),
-                    )
-                )
-                return job_id
-            return None
 
     # -------------------------------------------------------------------------
     # WORKER 1: SENTENCE COLLECTOR
@@ -113,24 +354,23 @@ class JobOrchestrator:
 
     async def _collector_dispatcher(self):
         while self.running:
-            job_id = await self._claim_next_job(JobType.COLLECTOR)
+            job_id = await self.jobs_repository.claim_next_job(JobType.COLLECTOR)
             if not job_id:
                 await asyncio.sleep(1.0)
                 continue
             try:
                 await self._process_collector_job(job_id)
             except Exception as exc:
-                logger.error(f"Collector job {job_id} failed: {exc}\n{traceback.format_exc()}")
-                await self._fail_job(job_id, str(exc))
+                logger.error(
+                    f"Collector job {job_id} failed: {exc}\n{traceback.format_exc()}"
+                )
+                await self.jobs_repository.fail_job(job_id, str(exc))
 
     async def _process_collector_job(self, job_id: str):
-        async with AsyncSessionLocal() as session:
-            job = await session.get(Job, job_id)
-            if not job:
-                return
-            book = await session.get(Book, job.book_id)
-            if not book:
-                return
+        data = await self.jobs_repository.get_job_with_book(job_id)
+        if not data:
+            return
+        job, book = data
 
         reader = PdfReader(book.pdf_path)
         total_pages = len(reader.pages)
@@ -140,84 +380,57 @@ class JobOrchestrator:
         current_page = (job.payload or {}).get("current_page", 0)
 
         # Check existing collected sentences in case of resumption
-        async with AsyncSessionLocal() as session:
-            existing_count = await session.scalar(
-                select(func.count(Sentence.id)).where(Sentence.book_id == book.id)
-            )
-            seq_counter = existing_count or 0
+        seq_counter = await self.jobs_repository.get_sentence_count(book.id)
 
         while current_page < total_pages:
-            logger.info(f"Book {book.id}: Collecting pages {current_page}..<{min(current_page + batch_size, total_pages)}")
+            logger.info(
+                f"Book {book.id}: Collecting pages {current_page}..<{min(current_page + batch_size, total_pages)}"
+            )
             page_text = "".join(
                 p.extract_text() or ""
                 for p in reader.pages[current_page : current_page + batch_size]
             )
 
             sentences = await self.nlp_service.extract_sentences(page_text)
-
-            async with AsyncSessionLocal() as session:
-                for sentence in sentences:
-                    model = Sentence(
-                        book_id=book.id,
-                        sequence_num=seq_counter,
-                        text=sentence.content.strip(),
-                    )
-                    session.add(model)
-                    seq_counter += 1
-
-                current_page += batch_size
-                await session.execute(
-                    update(Job)
-                    .where(Job.id == job_id)
-                    .values(payload={"current_page": current_page})
-                )
-                await session.commit()
+            current_page += batch_size
+            seq_counter = await self.jobs_repository.save_collected_sentences_batch(
+                job_id=job_id,
+                book_id=book.id,
+                sentence_texts=[s.content.strip() for s in sentences],
+                start_seq=seq_counter,
+                next_page=current_page,
+            )
 
         # Collector done: Spawn a PREPROCESSOR job for each extracted sentence
-        async with AsyncSessionLocal() as session:
-            sentences = (
-                await session.scalars(
-                    select(Sentence)
-                    .where(Sentence.book_id == book.id)
-                    .order_by(Sentence.sequence_num)
-                )
-            ).all()
+        sentences = await self.jobs_repository.get_book_sentences(book.id)
+        total_sentences = len(sentences)
+        preprocessor_specs = []
 
-            total_sentences = len(sentences)
-            for i, model in enumerate(sentences):
-                # Calculate sliding window context
-                c_indices = batch_indices(total_sentences, i, batch_size=5)
-                context_str = " ".join([sentences[j].text for j in c_indices])
-
-                prep_job = Job(
-                    id=uuid.uuid4().hex,
-                    book_id=book.id,
-                    job_type=JobType.PREPROCESSOR,
-                    status=JobStatus.PENDING,
-                    sequence_num=model.sequence_num,
-                    sentence_id=model.id,
-                    payload={
+        for i, model in enumerate(sentences):
+            c_indices = batch_indices(total_sentences, i, batch_size=5)
+            context_str = " ".join(sentences[j].text for j in c_indices)
+            preprocessor_specs.append(
+                {
+                    "sequence_num": model.sequence_num,
+                    "sentence_id": model.id,
+                    "payload": {
                         "sentence_text": model.text,
                         "context_text": context_str,
                         "source_language": book.source_language,
                         "target_language": book.target_language,
                     },
-                )
-                session.add(prep_job)
+                }
+            )
 
-            # Update book & collector status
-            await session.execute(
-                update(Book)
-                .where(Book.id == book.id)
-                .values(total_sentences=total_sentences)
-            )
-            await session.execute(
-                update(Job)
-                .where(Job.id == job_id)
-                .values(status=JobStatus.DONE)
-            )
-            await session.commit()
-            logger.info(f"Book {book.id}: Collector finished. Spawned {total_sentences} preprocessor jobs.")
+        await self.jobs_repository.complete_collector_job(
+            job_id=job_id,
+            book_id=book.id,
+            preprocessor_specs=preprocessor_specs,
+            total_sentences=total_sentences,
+        )
+        logger.info(
+            f"Book {book.id}: Collector finished. Spawned {total_sentences} preprocessor jobs."
+        )
 
     # -------------------------------------------------------------------------
     # WORKER 2: SENTENCE PREPROCESSOR
@@ -226,7 +439,7 @@ class JobOrchestrator:
     async def _preprocessor_dispatcher(self):
         while self.running:
             await self.preprocessor_sem.acquire()
-            job_id = await self._claim_next_job(JobType.PREPROCESSOR)
+            job_id = await self.jobs_repository.claim_next_job(JobType.PREPROCESSOR)
             if not job_id:
                 self.preprocessor_sem.release()
                 await asyncio.sleep(0.5)
@@ -238,45 +451,37 @@ class JobOrchestrator:
         try:
             await self._process_preprocessor_job(job_id)
         except Exception as exc:
-            logger.error(f"Preprocessor {job_id} failed: {exc}\n{traceback.format_exc()}")
-            await self._fail_job(job_id, str(exc))
+            logger.error(
+                f"Preprocessor {job_id} failed: {exc}\n{traceback.format_exc()}"
+            )
+            await self.jobs_repository.fail_job(job_id, str(exc))
         finally:
             self.preprocessor_sem.release()
 
     async def _process_preprocessor_job(self, job_id: str):
-        async with AsyncSessionLocal() as session:
-            job = await session.get(Job, job_id)
-            if not job:
-                return
-            payload = job.payload
+        job = await self.jobs_repository.get_job(job_id)
+        if not job:
+            return
+        payload = job.payload
 
         translation = await self.nlp_service.translate_sentence(
             source_language=payload["source_language"],
             target_language=payload["target_language"],
-            context_text=payload['context_text'],
-            sentence_text=payload['sentence_text'],
+            context_text=payload["context_text"],
+            sentence_text=payload["sentence_text"],
         )
 
         # Preprocessor finishes & spawns VOICER process
-        async with AsyncSessionLocal() as session:
-            voicer_job = Job(
-                id=uuid.uuid4().hex,
-                book_id=job.book_id,
-                job_type=JobType.VOICER,
-                status=JobStatus.PENDING,
-                sequence_num=job.sequence_num,
-                sentence_id=job.sentence_id,
-                payload={"translation_data": translation.model_dump()},
-            )
-            session.add(voicer_job)
-
-            await session.execute(
-                update(Job)
-                .where(Job.id == job_id)
-                .values(status=JobStatus.DONE, result=translation.model_dump())
-            )
-            await session.commit()
-            logger.info(f"Preprocessor completed sentence #{job.sequence_num}. Spawned voicer job.")
+        await self.jobs_repository.complete_preprocessor_job(
+            job_id=job_id,
+            book_id=job.book_id,
+            sequence_num=job.sequence_num,
+            sentence_id=job.sentence_id,
+            translation_data=translation.model_dump(),
+        )
+        logger.info(
+            f"Preprocessor completed sentence #{job.sequence_num}. Spawned voicer job."
+        )
 
     # -------------------------------------------------------------------------
     # WORKER 3: SENTENCE VOICER
@@ -285,7 +490,7 @@ class JobOrchestrator:
     async def _voicer_dispatcher(self):
         while self.running:
             await self.voicer_sem.acquire()
-            job_id = await self._claim_next_job(JobType.VOICER)
+            job_id = await self.jobs_repository.claim_next_job(JobType.VOICER)
             if not job_id:
                 self.voicer_sem.release()
                 await asyncio.sleep(0.5)
@@ -298,18 +503,17 @@ class JobOrchestrator:
             await self._process_voicer_job(job_id)
         except Exception as exc:
             logger.error(f"Voicer {job_id} failed: {exc}\n{traceback.format_exc()}")
-            await self._fail_job(job_id, str(exc))
+            await self.jobs_repository.fail_job(job_id, str(exc))
         finally:
             self.voicer_sem.release()
 
     async def _process_voicer_job(self, job_id: str):
-        async with AsyncSessionLocal() as session:
-            job = await session.get(Job, job_id)
-            if not job:
-                return
-            book_id = job.book_id
-            seq_num = job.sequence_num
-            payload = job.payload
+        job = await self.jobs_repository.get_job(job_id)
+        if not job:
+            return
+        book_id = job.book_id
+        seq_num = job.sequence_num
+        payload = job.payload
 
         part_filename = self.output_dir / book_id / f"part_{seq_num:05d}.mp3"
 
@@ -318,64 +522,18 @@ class JobOrchestrator:
             await render_sentence_audio(payload["translation_data"], part_filename)
 
         # Mark voicer completed and notify orchestrator
-        async with AsyncSessionLocal() as session:
-            await session.execute(
-                update(Job)
-                .where(Job.id == job_id)
-                .values(
-                    status=JobStatus.DONE,
-                    result={"audio_file": str(part_filename)},
-                )
-            )
-
-            # Update book progress
-            done_voicers = await session.scalar(
-                select(func.count(Job.id)).where(
-                    Job.book_id == book_id,
-                    Job.job_type == JobType.VOICER,
-                    Job.status == JobStatus.DONE,
-                )
-            )
-            await session.execute(
-                update(Book)
-                .where(Book.id == book_id)
-                .values(completed_sentences=done_voicers)
-            )
-            await session.commit()
-            logger.info(f"Voiced sentence #{seq_num} saved to {part_filename.name}")
-
-            # Orchestrator checks if all sentences are ready for gluing
-            await self._check_and_trigger_glue(session, book_id)
-
-    async def _check_and_trigger_glue(self, session, book_id: str):
-        book = await session.get(Book, book_id)
-        if not book or book.total_sentences == 0:
-            return
-
-        uncompleted = await session.scalar(
-            select(func.count(Job.id)).where(
-                Job.book_id == book_id,
-                Job.job_type == JobType.VOICER,
-                Job.status != JobStatus.DONE,
-            )
+        await self.jobs_repository.complete_voicer_job(
+            job_id=job_id,
+            book_id=book_id,
+            audio_file=str(part_filename),
         )
-        existing_glue = await session.scalar(
-            select(func.count(Job.id)).where(
-                Job.book_id == book_id,
-                Job.job_type == JobType.GLUE,
-            )
-        )
+        logger.info(f"Voiced sentence #{seq_num} saved to {part_filename.name}")
 
-        if uncompleted == 0 and existing_glue == 0:
-            glue_job = Job(
-                id=uuid.uuid4().hex,
-                book_id=book_id,
-                job_type=JobType.GLUE,
-                status=JobStatus.PENDING,
+        # Check if all sentences are ready for gluing
+        if await self.jobs_repository.try_spawn_glue_job(book_id):
+            logger.info(
+                f"All voicer jobs completed for Book {book_id}. Spawned final GLUE job."
             )
-            session.add(glue_job)
-            await session.commit()
-            logger.info(f"All voicer jobs completed for Book {book_id}. Spawned final GLUE job.")
 
     # -------------------------------------------------------------------------
     # WORKER 4: AUDIO GLUE
@@ -383,7 +541,7 @@ class JobOrchestrator:
 
     async def _glue_dispatcher(self):
         while self.running:
-            job_id = await self._claim_next_job(JobType.GLUE)
+            job_id = await self.jobs_repository.claim_next_job(JobType.GLUE)
             if not job_id:
                 await asyncio.sleep(1.0)
                 continue
@@ -391,24 +549,13 @@ class JobOrchestrator:
                 await self._process_glue_job(job_id)
             except Exception as exc:
                 logger.error(f"Glue job {job_id} failed: {exc}\n{traceback.format_exc()}")
-                await self._fail_job(job_id, str(exc))
+                await self.jobs_repository.fail_job(job_id, str(exc))
 
     async def _process_glue_job(self, job_id: str):
-        async with AsyncSessionLocal() as session:
-            job = await session.get(Job, job_id)
-            if not job:
-                return
-            book = await session.get(Book, job.book_id)
-            if not book:
-                return
-
-            voicer_jobs = (
-                await session.scalars(
-                    select(Job)
-                    .where(Job.book_id == book.id, Job.job_type == JobType.VOICER)
-                    .order_by(Job.sequence_num)
-                )
-            ).all()
+        data = await self.jobs_repository.get_glue_job_data(job_id)
+        if not data:
+            return
+        _, book, voicer_jobs = data
 
         part_files = [Path(j.result["audio_file"]) for j in voicer_jobs]
         final_mp3 = self.output_dir / f"audiobook_{book.id}.mp3"
@@ -416,41 +563,9 @@ class JobOrchestrator:
         logger.info(f"Gluing {len(part_files)} audio samples into {final_mp3.name}...")
         await concat_files_with_ffmpeg(final_mp3, part_files)
 
-        async with AsyncSessionLocal() as session:
-            await session.execute(
-                update(Job).where(Job.id == job_id).values(status=JobStatus.DONE)
-            )
-            await session.execute(
-                update(Book)
-                .where(Book.id == book.id)
-                .values(
-                    status=JobStatus.DONE,
-                    output_file=final_mp3.name,
-                )
-            )
-            await session.commit()
-            logger.info(f"Book {book.id} successfully completed: {final_mp3.name}")
-
-    # -------------------------------------------------------------------------
-    # ERROR HANDLING
-    # -------------------------------------------------------------------------
-
-    async def _fail_job(self, job_id: str, error_msg: str):
-        async with AsyncSessionLocal() as session:
-            job = await session.get(Job, job_id)
-            if not job:
-                return
-            job.retry_count += 1
-            if job.retry_count < 3:
-                # Retry transient failures
-                job.status = JobStatus.PENDING
-                job.error = f"Retrying: {error_msg}"
-            else:
-                job.status = JobStatus.FAILED
-                job.error = error_msg
-                await session.execute(
-                    update(Book)
-                    .where(Book.id == job.book_id)
-                    .values(status=JobStatus.FAILED, error=error_msg)
-                )
-            await session.commit()
+        await self.jobs_repository.complete_glue_job(
+            job_id=job_id,
+            book_id=book.id,
+            output_filename=final_mp3.name,
+        )
+        logger.info(f"Book {book.id} successfully completed: {final_mp3.name}")
