@@ -1,51 +1,13 @@
 import asyncio
 import io
-import math
-import os
 from pathlib import Path
 from typing import Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
 from pydub import AudioSegment
 
-LLM_API_BASE = os.getenv("LLM_API_BASE", "http://localhost:8080/v1")
-LLM_MODEL = os.getenv(
-    "LLM_MODEL", "openai/unsloth/Qwen3.6-35B-A3B-MTP-GGUF:UD-Q4_K_M"
-)
-TTS_BASE_URL = os.getenv("TTS_BASE_URL", "http://localhost:8919")
-
-
-class UncommonWord(BaseModel):
-    source: str
-    target: str
-
-
-class SentencePair(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    source: str
-    target: str
-    uncommon_words: list[UncommonWord] | None = Field(
-        default=None, alias="uncommonWords"
-    )
-
-
-class TranslationOutput(BaseModel):
-    sentences: list[SentencePair]
-
-
-def batch_indices(items_length: int, i: int, batch_size: int = 5) -> range:
-    """Safe batch index context calculation."""
-    if items_length <= batch_size:
-        return range(items_length)
-    if i < batch_size / 2:
-        return range(batch_size)
-    elif i >= items_length - batch_size / 2:
-        return range(items_length - batch_size, items_length)
-    else:
-        start = math.ceil(i - batch_size / 2)
-        return range(start, start + batch_size)
+from bookaudio.constants import TTS_BASE_URL
+from bookaudio.nlp import TranslationOutput
 
 
 async def generate_audio_clip(

@@ -9,8 +9,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bookaudio.database import get_db, init_db
+from bookaudio.nlp import NLPService
 from bookaudio.models import Book, Job, JobStatus, JobType
-from bookaudio.orchestrator import Orchestrator
+from bookaudio.jobs import JobOrchestrator
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
@@ -19,7 +20,7 @@ OUTPUT_DIR = BASE_DIR / "output"
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-orchestrator = Orchestrator(BASE_DIR)
+orchestrator = JobOrchestrator(BASE_DIR, nlp_service=NLPService())
 
 
 @asynccontextmanager
