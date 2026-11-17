@@ -49,3 +49,6 @@ generation:
 - Qwen3.6-35B-A3B
 - Gemini 3.8 Flash
 - Gemini 4 Hydrogen
+
+A human author reviewed, edited, and holds final responsibility for
+the accuracy, originality, and integrity of the work.
