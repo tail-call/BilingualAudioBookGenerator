@@ -1,8 +1,9 @@
-# BookAudio
+# Bilingual Audio Book Generator
 
 <!--For Zuri-->
 
-A bilingual audio book generator for learning English.
+A bilingual audio book generator for learning English. It uses LLM
+and a TTS model to prepare a complete audio book. It has a web UI.
 
 Stack: llama.cpp, audio.cpp, FastAPI, litellm, SQLAlchemy, PostgreSQL
 
