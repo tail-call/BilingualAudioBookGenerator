@@ -1,6 +1,6 @@
 FROM python:3.14-slim
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.21 /uv /uvx /bin/
 
 WORKDIR /app
 
@@ -25,3 +25,4 @@ COPY run-app.sh run-app.sh
 
 RUN chmod +x run-app.sh
 CMD ["./run-app.sh"]
+
