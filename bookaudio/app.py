@@ -12,7 +12,7 @@ from bookaudio.jobs_repository import JobsRepository
 from bookaudio.database import get_db, init_db
 from bookaudio.nlp import NLPService
 from bookaudio.models import Book, Job, JobStatus, JobType
-from bookaudio.jobs import JobOrchestrator
+from bookaudio.jobs_orchestrator import JobOrchestrator
 
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
