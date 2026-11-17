@@ -16,7 +16,7 @@ RUN git clone --branch v0.9.0 https://github.com/ggml-org/llama.cpp /root/llama.
     && cmake .. \
         -DGGML_CUDA=ON \
         -DLLAMA_BUILD_TESTS=OFF \
-        -DCMAKE_CUDA_ARCHITECTURES="80;86;89;90" \
+        -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90" \
     && make -j$(nproc)
 
 WORKDIR /root/llama.cpp
