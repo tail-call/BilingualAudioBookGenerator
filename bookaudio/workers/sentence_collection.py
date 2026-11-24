@@ -1,6 +1,4 @@
-import asyncio
 import logging
-import traceback
 
 from pypdf import PdfReader
 
