@@ -22,6 +22,14 @@ class ParsedSentence(BaseModel):
     type: SentenceType
     content: str = Field(..., description="The text content of the sentence")
 
+class SentencePair(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    source: str
+    target: str
+    uncommon_words: list[UncommonWord] | None = Field(
+        default=None, alias="uncommonWords"
+    )
 
 class TranslationOutput(BaseModel):
     sentences: list[SentencePair]
@@ -32,14 +40,6 @@ class UncommonWord(BaseModel):
     target: str
 
 
-class SentencePair(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    source: str
-    target: str
-    uncommon_words: list[UncommonWord] | None = Field(
-        default=None, alias="uncommonWords"
-    )
 
 
 class NLPService:
