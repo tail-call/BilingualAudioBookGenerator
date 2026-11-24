@@ -36,7 +36,7 @@ class BaseWorker:
         if self._semaphore:
             await self._semaphore.acquire()
 
-        job_id = await self.jobs_repository.claim_next_job(JobType.VOICER)
+        job_id = await self.jobs_repository.claim_next_job(self.job_type)
 
         if not job_id:
             if self._semaphore:
