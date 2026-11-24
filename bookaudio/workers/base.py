@@ -30,19 +30,22 @@ class BaseWorker:
 
     async def dispatch(self):
         while self.parent.running:
+            await self.dispatch_one()
+
+    async def dispatch_one(self):
+        if self._semaphore:
+            await self._semaphore.acquire()
+
+        job_id = await self.jobs_repository.claim_next_job(JobType.VOICER)
+
+        if not job_id:
             if self._semaphore:
-                await self._semaphore.acquire()
+                self._semaphore.release()
 
-            job_id = await self.jobs_repository.claim_next_job(JobType.VOICER)
+            await asyncio.sleep(self.idle_delay)
+            return
 
-            if not job_id:
-                if self._semaphore:
-                    self._semaphore.release()
-
-                await asyncio.sleep(self.idle_delay)
-                continue
-
-            asyncio.create_task(self._try_run_job(job_id))
+        asyncio.create_task(self._try_run_job(job_id))
 
     async def _try_run_job(self, job_id: str):
         try:
