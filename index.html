@@ -3,181 +3,783 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BookAudio — Audiobook Generator</title>
+<title>Bilingual Audio Book Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Play:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --border: #2a2d3a;
-    --text: #e2e4e9;
-    --muted: #8b8fa3;
-    --accent: #6c8cff;
-    --accent-hover: #8ba4ff;
-    --green: #4ade80;
-    --red: #f87171;
-    --yellow: #fbbf24;
-    --radius: 10px;
+    --bg-primary: #f2f6ff;
+    --bg-card: rgba(255, 255, 255, 0.78);
+    --bg-card-solid: #ffffff;
+    --bg-subtle: rgba(153, 161, 187, 0.12);
+    --border-subtle: rgba(66, 94, 121, 0.14);
+    --border-hover: rgba(255, 44, 130, 0.45);
+    --text-primary: #1c2532;
+    --text-secondary: #425e79;
+    --text-muted: #64748b;
+    --accent-primary: #ff2c82;
+    --accent-secondary: #ff7cde;
+    --accent-indigo: #6366f1;
+    --success: #10b981;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+    --font-sans: 'Play', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --radius-lg: 18px;
+    --radius-md: 11px;
+    --shadow-card: 0 18px 45px -18px rgba(28, 37, 50, 0.14), 0 4px 14px -4px rgba(99, 102, 241, 0.08);
+    --transition: all 0.32s cubic-bezier(0.4, 0, 0.2, 1);
   }
-  * { margin:0; padding:0; box-sizing:border-box; }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: var(--bg);
-    color: var(--text);
+    font-family: var(--font-sans);
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
     line-height: 1.6;
     min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    flex-direction: column;
   }
-  .container { max-width: 800px; margin: 0 auto; padding: 2rem 1.5rem; }
 
-  header { text-align: center; margin-bottom: 2.5rem; }
-  header h1 { font-size: 2rem; font-weight: 700; }
-  header h1 span { color: var(--accent); }
-  header p { color: var(--muted); margin-top: .4rem; }
+  /* Ambient Grid & Glow */
+  .bg-grid {
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(66, 94, 121, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(66, 94, 121, 0.05) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse at top center, black 25%, transparent 80%);
+    -webkit-mask-image: radial-gradient(ellipse at top center, black 25%, transparent 80%);
+    pointer-events: none;
+    z-index: -2;
+  }
 
-  /* Card */
+  .bg-glow {
+    position: fixed;
+    top: -180px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 960px;
+    height: 520px;
+    background: radial-gradient(circle, rgba(255, 44, 130, 0.14) 0%, rgba(138, 154, 233, 0.18) 45%, transparent 75%);
+    filter: blur(64px);
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  /* Top Navigation Bar */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    background: rgba(242, 246, 255, 0.78);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .topbar-inner {
+    max-width: 1160px;
+    margin: 0 auto;
+    padding: 0.9rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .logo {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: 0.95rem;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-primary);
+  }
+
+  .logo-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    box-shadow: 0 0 12px rgba(255, 44, 130, 0.6);
+    flex-shrink: 0;
+  }
+
+  /* Toggle Jobs Button */
+  .btn-toggle-jobs {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0.55rem 1rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.88rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition);
+    box-shadow: 0 4px 12px rgba(28, 37, 50, 0.05);
+  }
+
+  .btn-toggle-jobs:hover {
+    border-color: var(--accent-primary);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(255, 44, 130, 0.16);
+  }
+
+  .btn-toggle-jobs.active {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 6px 20px rgba(255, 44, 130, 0.32);
+  }
+
+  .job-count-pill {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--bg-subtle);
+    color: var(--text-secondary);
+  }
+
+  .btn-toggle-jobs.active .job-count-pill {
+    background: rgba(255, 255, 255, 0.24);
+    color: #fff;
+  }
+
+  .status-pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--success);
+    display: none;
+    animation: pulse 1.8s infinite;
+  }
+
+  .status-pulse.live { display: inline-block; }
+
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.65); }
+    70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+  }
+
+  /* Main Container & Hero */
+  .main-wrap {
+    flex: 1;
+    width: 100%;
+    max-width: 1160px;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 3.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .hero-header {
+    text-align: center;
+    margin-bottom: 2.2rem;
+    max-width: 680px;
+  }
+
+  .hero-header h1 {
+    font-size: clamp(2rem, 4.2vw, 3rem);
+    font-weight: 700;
+    line-height: 1.12;
+    letter-spacing: -0.03em;
+    margin-bottom: 0.65rem;
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, #6366f1 10%, #c14dd0 52%, #ff2c82 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-header p {
+    color: var(--text-secondary);
+    font-size: 1.05rem;
+  }
+
+  /* Split Workspace (Form centered -> shifts left when Jobs pop-up appears on right) */
+  .workspace {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 0;
+    transition: var(--transition);
+  }
+
+  .workspace.jobs-open {
+    gap: 1.75rem;
+  }
+
+  /* Card Base */
   .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
+    background: var(--bg-card);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    padding: 1.75rem;
+    box-shadow: var(--shadow-card);
+    position: relative;
+    overflow: hidden;
   }
-  .card h2 { font-size: 1.15rem; margin-bottom: 1rem; }
 
-  /* Form */
-  .form-row { display:flex; gap:1rem; flex-wrap:wrap; margin-bottom:1rem; }
-  .form-group { flex:1; min-width:200px; }
-  label { display:block; font-size:.85rem; color:var(--muted); margin-bottom:.3rem; }
-  input[type="text"], select {
-    width:100%; padding:.6rem .8rem; border:1px solid var(--border);
-    border-radius:6px; background:var(--bg); color:var(--text); font-size:.95rem;
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--accent-indigo), var(--accent-primary), var(--accent-secondary));
+    opacity: 0.85;
   }
-  input[type="file"] {
-    width:100%; padding:.6rem; border:2px dashed var(--border);
-    border-radius:6px; background:var(--bg); color:var(--muted); cursor:pointer;
-    text-align:center;
-  }
-  input[type="file"]:hover { border-color: var(--accent); }
 
-  button {
-    padding: .7rem 1.6rem; border:none; border-radius:6px;
-    background: var(--accent); color:#fff; font-size:.95rem; font-weight:600;
-    cursor:pointer; transition: background .2s;
+  /* Entry Form Card */
+  .form-card {
+    width: 100%;
+    max-width: 470px;
+    flex-shrink: 0;
+    transition: var(--transition);
   }
-  button:hover { background: var(--accent-hover); }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  button.danger { background: var(--red); }
-  button.danger:hover { background: #e05555; }
-  button.small { padding:.4rem .8rem; font-size:.8rem; }
 
-  /* Progress bar */
+  .card-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 1.2rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  /* Form Controls */
+  .form-group {
+    margin-bottom: 1.1rem;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.9rem;
+    margin-bottom: 1.25rem;
+  }
+
+  label {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 0.4rem;
+    letter-spacing: 0.01em;
+  }
+
+  select {
+    width: 100%;
+    padding: 0.68rem 0.85rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.9);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.95rem;
+    transition: var(--transition);
+    cursor: pointer;
+  }
+
+  select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(255, 44, 130, 0.14);
+  }
+
+  /* Styled File Dropzone */
+  .file-drop {
+    position: relative;
+    border: 2px dashed rgba(99, 102, 241, 0.35);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.65);
+    padding: 1.35rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    transition: var(--transition);
+  }
+
+  .file-drop:hover,
+  .file-drop.dragover {
+    border-color: var(--accent-primary);
+    background: rgba(255, 44, 130, 0.04);
+  }
+
+  .file-drop input[type="file"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  .file-drop-icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .file-drop-label {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    word-break: break-word;
+  }
+
+  .file-drop-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+  }
+
+  /* Primary Button */
+  .btn-primary {
+    width: 100%;
+    padding: 0.85rem 1.4rem;
+    border: none;
+    border-radius: var(--radius-md);
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    color: #fff;
+    font-family: var(--font-sans);
+    font-size: 0.98rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition);
+    box-shadow: 0 8px 24px -6px rgba(255, 44, 130, 0.48);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 28px -4px rgba(255, 44, 130, 0.58);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* Jobs Pop-up Window (Right Panel) */
+  .jobs-popup {
+    width: 0;
+    max-width: 560px;
+    opacity: 0;
+    transform: translateX(24px) scale(0.98);
+    pointer-events: none;
+    overflow: hidden;
+    transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.28s ease,
+                transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .workspace.jobs-open .jobs-popup {
+    width: 100%;
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    pointer-events: auto;
+    overflow: visible;
+  }
+
+  .jobs-card {
+    width: 100%;
+    max-height: 78vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .jobs-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+
+  .jobs-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .btn-close {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    border: 1px solid var(--border-subtle);
+    background: rgba(255, 255, 255, 0.7);
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    transition: var(--transition);
+  }
+
+  .btn-close:hover {
+    background: var(--accent-primary);
+    color: #fff;
+    border-color: var(--accent-primary);
+  }
+
+  /* Live Active Job Tracker */
+  .live-tracker {
+    background: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: var(--radius-md);
+    padding: 0.9rem 1rem;
+    margin-bottom: 1rem;
+    display: none;
+  }
+
+  .live-tracker.visible {
+    display: block;
+    animation: fadeIn 0.25s ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .live-tracker-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 0.45rem;
+  }
+
   .progress-wrap {
-    margin-top:1rem; background:var(--bg); border-radius:20px; height:10px; overflow:hidden;
+    background: rgba(66, 94, 121, 0.12);
+    border-radius: 999px;
+    height: 8px;
+    overflow: hidden;
   }
-  .progress-bar {
-    height:100%; width:0%; background:var(--accent); border-radius:20px;
-    transition: width .4s ease;
-  }
-  .progress-bar.green { background: var(--green); }
-  .progress-bar.red { background: var(--red); }
 
-  /* Job list */
-  .job-list { list-style:none; }
-  .job-item {
-    display:flex; align-items:center; gap:1rem; padding:.9rem 0;
-    border-bottom:1px solid var(--border);
+  .progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent-indigo), var(--accent-primary));
+    border-radius: 999px;
+    transition: width 0.4s ease;
   }
-  .job-item:last-child { border-bottom:none; }
-  .job-info { flex:1; min-width:0; }
-  .job-name { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .job-meta { font-size:.8rem; color:var(--muted); }
+
+  .progress-bar.green { background: var(--success); }
+  .progress-bar.red { background: var(--danger); }
+
+  .log {
+    background: #f8faff;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-secondary);
+    max-height: 110px;
+    overflow-y: auto;
+    margin-top: 0.65rem;
+    white-space: pre-wrap;
+  }
+
+  /* Job List */
+  .job-list {
+    list-style: none;
+    overflow-y: auto;
+    padding-right: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .job-item {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 0.85rem 0.95rem;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid var(--border-subtle);
+    transition: var(--transition);
+  }
+
+  .job-item:hover {
+    border-color: rgba(99, 102, 241, 0.35);
+    transform: translateY(-1px);
+  }
+
+  .job-info { flex: 1; min-width: 0; }
+  .job-name {
+    font-weight: 700;
+    font-size: 0.92rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .job-meta {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
 
   .badge {
-    display:inline-block; padding:.2rem .6rem; border-radius:20px;
-    font-size:.75rem; font-weight:600; text-transform:uppercase;
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    flex-shrink: 0;
   }
-  .badge.pending { background:#374151; color:var(--muted); }
-  .badge.processing { background:#1e3a5f; color:var(--accent); }
-  .badge.done { background:#14532d; color:var(--green); }
-  .badge.failed { background:#7f1d1d; color:var(--red); }
+  .badge.pending { background: rgba(100, 116, 139, 0.14); color: var(--text-secondary); }
+  .badge.processing { background: rgba(99, 102, 241, 0.15); color: var(--accent-indigo); }
+  .badge.done { background: rgba(16, 185, 129, 0.16); color: #059669; }
+  .badge.failed { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
 
-  .actions { display:flex; gap:.5rem; flex-shrink:0; }
-  .actions a { text-decoration:none; }
+  .actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+  .actions a { text-decoration: none; }
 
-  /* Empty state */
-  .empty { text-align:center; color:var(--muted); padding:2rem 0; }
+  .btn-sm {
+    padding: 0.38rem 0.68rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-subtle);
+    background: #fff;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition);
+  }
 
-  /* Log */
-  .log {
-    background:var(--bg); border-radius:6px; padding:.8rem;
-    font-family:monospace; font-size:.8rem; color:var(--muted);
-    max-height:200px; overflow-y:auto; margin-top:.8rem;
+  .btn-sm:hover {
+    border-color: var(--accent-indigo);
+    color: var(--accent-indigo);
+  }
+
+  .btn-sm.download {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    color: #fff;
+    border-color: transparent;
+  }
+
+  .btn-sm.download:hover {
+    opacity: 0.92;
+    color: #fff;
+  }
+
+  .btn-sm.danger:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.06);
+  }
+
+  .empty {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    padding: 2rem 1rem;
+    border: 1px dashed var(--border-subtle);
+    border-radius: var(--radius-md);
   }
 
   /* Responsive */
-  @media (max-width:500px) {
-    .form-row { flex-direction:column; }
-    .job-item { flex-direction:column; align-items:flex-start; }
-    .actions { width:100%; justify-content:flex-end; }
+  @media (max-width: 900px) {
+    .workspace.jobs-open {
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .form-card,
+    .workspace.jobs-open .jobs-popup {
+      max-width: 540px;
+    }
+
+    .jobs-popup {
+      transform: translateY(16px);
+      height: 0;
+    }
+
+    .workspace.jobs-open .jobs-popup {
+      height: auto;
+      transform: translateY(0);
+    }
+  }
+
+  @media (max-width: 520px) {
+    .form-row { grid-template-columns: 1fr; }
+    .job-item { flex-wrap: wrap; }
+    .actions { width: 100%; justify-content: flex-end; }
   }
 </style>
 </head>
 <body>
-<div class="container">
+<div class="bg-grid"></div>
+<div class="bg-glow"></div>
 
-  <header>
-    <h1>🎧 <span>Book</span>Audio</h1>
-    <p>Upload a PDF → get a bilingual audiobook</p>
-  </header>
-
-  <!-- Upload card -->
-  <div class="card">
-    <h2>Upload &amp; Generate</h2>
-    <form id="upload-form">
-      <div class="form-row">
-        <div class="form-group">
-          <label for="pdf-input">PDF File</label>
-          <input type="file" id="pdf-input" accept=".pdf" required>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="src-lang">Source Language</label>
-          <select id="src-lang">
-            <option value="English" selected>English</option>
-            <option value="Russian">Russian</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="tgt-lang">Target Language</label>
-          <select id="tgt-lang">
-            <option value="Russian" selected>Russian</option>
-            <option value="English">English</option>
-          </select>
-        </div>
-      </div>
-      <button type="submit" id="submit-btn">Generate Audiobook</button>
-    </form>
-    <div class="progress-wrap" id="progress-wrap" style="display:none;">
-      <div class="progress-bar" id="progress-bar"></div>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="logo">
+      <span class="logo-dot"></span>
+      <span>Bilingual Audio Book Generator</span>
     </div>
-    <div class="log" id="status-log" style="display:none;"></div>
+    <button type="button" class="btn-toggle-jobs" id="toggle-jobs-btn" aria-expanded="false">
+      <span class="status-pulse" id="active-pulse"></span>
+      <span id="toggle-jobs-label">Jobs</span>
+      <span class="job-count-pill" id="job-count-pill">0</span>
+    </button>
+  </div>
+</header>
+
+<main class="main-wrap">
+  <div class="hero-header">
+    <h1><span class="gradient-text">Bilingual Audio Book</span> Generator</h1>
+    <p>Drop in a PDF, pick your languages, and turn any book into a bilingual audio experience.</p>
   </div>
 
-  <!-- Jobs card -->
-  <div class="card">
-    <h2>Recent Jobs</h2>
-    <ul class="job-list" id="job-list">
-      <li class="empty">No jobs yet. Upload a PDF to get started.</li>
-    </ul>
-  </div>
+  <div class="workspace" id="workspace">
+    <!-- Simple Entry Form -->
+    <section class="card form-card" aria-label="Upload PDF form">
+      <div class="card-title">
+        <span>New Audiobook</span>
+      </div>
+      <form id="upload-form">
+        <div class="form-group">
+          <label for="pdf-input">PDF Document</label>
+          <div class="file-drop" id="file-drop">
+            <input type="file" id="pdf-input" accept=".pdf" required>
+            <div class="file-drop-icon">📄</div>
+            <div class="file-drop-label" id="file-label">Choose a PDF or drag it here</div>
+            <div class="file-drop-hint">Supports .pdf files</div>
+          </div>
+        </div>
 
-</div>
+        <div class="form-row">
+          <div>
+            <label for="src-lang">Source Language</label>
+            <select id="src-lang">
+              <option value="English" selected>English</option>
+              <option value="Russian">Russian</option>
+            </select>
+          </div>
+          <div>
+            <label for="tgt-lang">Target Language</label>
+            <select id="tgt-lang">
+              <option value="Russian" selected>Russian</option>
+              <option value="English">English</option>
+            </select>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary" id="submit-btn">Generate Audiobook</button>
+      </form>
+    </section>
+
+    <!-- Pop-up Jobs Window (Right of Form) -->
+    <aside class="jobs-popup" id="jobs-popup" aria-label="Jobs window" aria-hidden="true">
+      <div class="card jobs-card">
+        <div class="jobs-header">
+          <div class="jobs-header-left">
+            <h2 style="font-size:1.12rem; font-weight:700;">Jobs Queue</h2>
+          </div>
+          <button type="button" class="btn-close" id="close-jobs-btn" title="Hide jobs window">&times;</button>
+        </div>
+
+        <div class="live-tracker" id="live-tracker">
+          <div class="live-tracker-top">
+            <span id="live-job-label">Active Job</span>
+            <span id="live-job-pct">0%</span>
+          </div>
+          <div class="progress-wrap">
+            <div class="progress-bar" id="progress-bar"></div>
+          </div>
+          <div class="log" id="status-log"></div>
+        </div>
+
+        <ul class="job-list" id="job-list">
+          <li class="empty">No jobs yet. Upload a PDF to get started.</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</main>
 
 <script>
-// ── Helpers ──────────────────────────────────────────────────────────
 const API = "";
 const $ = id => document.getElementById(id);
 
+let isJobsOpen = false;
+let pollTimer = null;
+
+function setJobsWindow(open) {
+  isJobsOpen = typeof open === "boolean" ? open : !isJobsOpen;
+  $("workspace").classList.toggle("jobs-open", isJobsOpen);
+  $("jobs-popup").setAttribute("aria-hidden", String(!isJobsOpen));
+  $("toggle-jobs-btn").classList.toggle("active", isJobsOpen);
+  $("toggle-jobs-btn").setAttribute("aria-expanded", String(isJobsOpen));
+}
+
+$("toggle-jobs-btn").addEventListener("click", () => setJobsWindow());
+$("close-jobs-btn").addEventListener("click", () => setJobsWindow(false));
+
+// ── File dropzone feedback ───────────────────────────────────────────
+const pdfInput = $("pdf-input");
+const fileDrop = $("file-drop");
+const fileLabel = $("file-label");
+
+pdfInput.addEventListener("change", () => {
+  const file = pdfInput.files[0];
+  fileLabel.textContent = file ? file.name : "Choose a PDF or drag it here";
+});
+
+["dragenter", "dragover"].forEach(evt => {
+  fileDrop.addEventListener(evt, e => {
+    e.preventDefault();
+    fileDrop.classList.add("dragover");
+  });
+});
+
+["dragleave", "drop"].forEach(evt => {
+  fileDrop.addEventListener(evt, e => {
+    e.preventDefault();
+    fileDrop.classList.remove("dragover");
+  });
+});
+
+fileDrop.addEventListener("drop", e => {
+  const files = e.dataTransfer.files;
+  if (files && files.length) {
+    pdfInput.files = files;
+    fileLabel.textContent = files[0].name;
+  }
+});
+
+// ── HTTP Helpers ─────────────────────────────────────────────────────
 async function get(path) {
   const r = await fetch(API + path);
   if (!r.ok) throw new Error(r.status + " " + r.statusText);
@@ -190,46 +792,55 @@ async function post(path, body, headers) {
   return r.json();
 }
 
-// ── Render jobs list ─────────────────────────────────────────────────
-async function renderJobs() {
-  const jobs = await get("/jobs");
-  const list = $("job-list");
-  if (!jobs.length) {
-    list.innerHTML = '<li class="empty">No jobs yet. Upload a PDF to get started.</li>';
-    return;
-  }
-  list.innerHTML = jobs.sort((a,b) => b.created_at.localeCompare(a.created_at))
-    .map(j => {
-      const badgeClass = j.status;
-      const canDownload = j.status === "done" && j.output_file;
-      const canStart = j.status === "pending";
-      return `<li class="job-item">
-        <div class="job-info">
-          <div class="job-name">${escapeHtml(j.pdf_filename || j.id)}</div>
-          <div class="job-meta">${j.created_at} · ${j.progress}%</div>
-        </div>
-        <span class="badge ${badgeClass}">${j.status}</span>
-        <div class="actions">
-          ${canStart ? `<button class="small" onclick="startJob('${j.id}')">▶ Start</button>` : ""}
-          ${canDownload ? `<a href="/output/${escapeHtml(j.output_file)}" download><button class="small">⬇ Download</button></a>` : ""}
-          <button class="small danger" onclick="deleteJob('${j.id}')">✕</button>
-        </div>
-      </li>`;
-    }).join("");
-}
-
 function escapeHtml(s) {
   const d = document.createElement("div");
   d.textContent = s;
   return d.innerHTML;
 }
 
-// ── Upload form ──────────────────────────────────────────────────────
+// ── Render Jobs ──────────────────────────────────────────────────────
+async function renderJobs() {
+  try {
+    const jobs = await get("/jobs");
+    $("job-count-pill").textContent = jobs.length;
+
+    const hasProcessing = jobs.some(j => j.status === "processing");
+    $("active-pulse").classList.toggle("live", hasProcessing);
+
+    const list = $("job-list");
+    if (!jobs.length) {
+      list.innerHTML = '<li class="empty">No jobs yet. Upload a PDF to get started.</li>';
+      return;
+    }
+
+    list.innerHTML = jobs
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .map(j => {
+        const canDownload = j.status === "done" && j.output_file;
+        const canStart = j.status === "pending";
+        return `<li class="job-item">
+          <div class="job-info">
+            <div class="job-name">${escapeHtml(j.pdf_filename || j.id)}</div>
+            <div class="job-meta">${escapeHtml(j.created_at)} · ${j.progress}%</div>
+          </div>
+          <span class="badge ${escapeHtml(j.status)}">${escapeHtml(j.status)}</span>
+          <div class="actions">
+            ${canStart ? `<button type="button" class="btn-sm" onclick="startJob('${j.id}')">▶ Start</button>` : ""}
+            ${canDownload ? `<a href="/output/${escapeHtml(j.output_file)}" download><button type="button" class="btn-sm download">⬇ Audio</button></a>` : ""}
+            <button type="button" class="btn-sm danger" onclick="deleteJob('${j.id}')" title="Delete job">✕</button>
+          </div>
+        </li>`;
+      }).join("");
+  } catch {
+    // ignore transient polling errors
+  }
+}
+
+// ── Upload Form ──────────────────────────────────────────────────────
 $("upload-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const file = $("pdf-input").files[0];
-  const src = $("src-lang").value;
-  const tgt = $("tgt-lang").value;
+  const file = pdfInput.files[0];
+  if (!file) return;
 
   const btn = $("submit-btn");
   btn.disabled = true;
@@ -238,19 +849,25 @@ $("upload-form").addEventListener("submit", async (e) => {
   try {
     const fd = new FormData();
     fd.append("pdf", file);
-    fd.append("source_language", src);
-    fd.append("target_language", tgt);
+    fd.append("source_language", $("src-lang").value);
+    fd.append("target_language", $("tgt-lang").value);
 
     const result = await post("/jobs", fd);
     const jobId = result.job_id;
 
-    $("progress-wrap").style.display = "block";
-    $("status-log").style.display = "block";
+    // Pop open the Jobs window to the right when triggered
+    setJobsWindow(true);
+
+    $("live-tracker").classList.add("visible");
+    $("live-job-label").textContent = file.name;
+    $("live-job-pct").textContent = "0%";
+    $("progress-bar").style.width = "0%";
+    $("progress-bar").className = "progress-bar";
     $("status-log").textContent = `Job created: ${jobId}\n`;
 
-    // Auto-start
     await post(`/jobs/${jobId}/start`, null);
     pollJob(jobId);
+    renderJobs();
   } catch (err) {
     alert("Error: " + err.message);
   } finally {
@@ -262,6 +879,10 @@ $("upload-form").addEventListener("submit", async (e) => {
 // ── Start / Delete ───────────────────────────────────────────────────
 async function startJob(id) {
   try {
+    setJobsWindow(true);
+    $("live-tracker").classList.add("visible");
+    $("live-job-label").textContent = `Job ${id}`;
+    $("status-log").textContent = `Starting job: ${id}\n`;
     await post(`/jobs/${id}/start`, null);
     pollJob(id);
     renderJobs();
@@ -281,24 +902,25 @@ async function deleteJob(id) {
 }
 
 // ── Polling ──────────────────────────────────────────────────────────
-let pollTimer = null;
-
 function pollJob(jobId) {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
     try {
       const j = await get(`/jobs/${jobId}`);
-      // Update progress bar
       const bar = $("progress-bar");
       bar.style.width = j.progress + "%";
       bar.className = "progress-bar";
       if (j.status === "done") bar.classList.add("green");
       if (j.status === "failed") bar.classList.add("red");
 
-      // Update log
+      $("live-job-pct").textContent = `${j.progress}%`;
+
       const log = $("status-log");
-      log.textContent += `[${j.progress}%] ${j.status}\n`;
-      log.scrollTop = log.scrollHeight;
+      const line = `[${j.progress}%] ${j.status}\n`;
+      if (!log.textContent.endsWith(line)) {
+        log.textContent += line;
+        log.scrollTop = log.scrollHeight;
+      }
 
       renderJobs();
 
@@ -314,7 +936,7 @@ function pollJob(jobId) {
 
 // ── Init ─────────────────────────────────────────────────────────────
 renderJobs();
-setInterval(renderJobs, 10000); // auto-refresh
+setInterval(renderJobs, 10000);
 </script>
 </body>
 </html>
