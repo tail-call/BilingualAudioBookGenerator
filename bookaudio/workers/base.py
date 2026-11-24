@@ -23,14 +23,22 @@ class BaseWorker:
         self.jobs_repository = jobs_repository
         self.job_type = job_type
         self.idle_delay = idle_delay
-        self._semaphore = asyncio.Semaphore(max_concurrency)
+        if max_concurrency > 0:
+            self._semaphore = asyncio.Semaphore(max_concurrency)
+        else:
+            self._semaphore = None
 
     async def dispatch(self):
         while self.parent.running:
-            await self._semaphore.acquire()
+            if self._semaphore:
+                await self._semaphore.acquire()
+
             job_id = await self.jobs_repository.claim_next_job(JobType.VOICER)
+
             if not job_id:
-                self._semaphore.release()
+                if self._semaphore:
+                    self._semaphore.release()
+
                 await asyncio.sleep(self.idle_delay)
                 continue
 
@@ -45,7 +53,8 @@ class BaseWorker:
             )
             await self.jobs_repository.fail_job(job_id, str(exc))
         finally:
-            self._semaphore.release()
+            if self._semaphore:
+                self._semaphore.release()
 
     async def _find_and_run_job(self, job_id: str):
         job = await self.jobs_repository.get_job(job_id)

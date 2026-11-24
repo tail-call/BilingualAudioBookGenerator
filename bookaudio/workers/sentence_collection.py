@@ -5,41 +5,34 @@ import traceback
 from pypdf import PdfReader
 
 from bookaudio.jobs_repository import JobsRepository
-from bookaudio.models import JobType
+from bookaudio.models import Job, JobType
 from bookaudio.nlp import NLPService
 from bookaudio.util import batch_indices
+from bookaudio.workers.base import BaseWorker
 from bookaudio.workers.protocols import Runnable
 
 logger = logging.getLogger(__name__)
 
 
-class SentenceCollectionWorker:
+class SentenceCollectionWorker(BaseWorker):
     def __init__(
         self,
         parent: Runnable,
         jobs_repository: JobsRepository,
         nlp_service: NLPService,
     ):
-        self.parent = parent
-        self.jobs_repository = jobs_repository
+        super().__init__(
+            parent,
+            jobs_repository,
+            JobType.COLLECTOR,
+            idle_delay=1.0,
+            max_concurrency=0,
+        )
         self.nlp_service = nlp_service
 
-    async def dispatch(self):
-        while self.parent.running:
-            job_id = await self.jobs_repository.claim_next_job(JobType.COLLECTOR)
-            if not job_id:
-                await asyncio.sleep(1.0)
-                continue
-            try:
-                await self._process_collector_job(job_id)
-            except Exception as exc:
-                logger.error(
-                    f"Collector job {job_id} failed: {exc}\n{traceback.format_exc()}"
-                )
-                await self.jobs_repository.fail_job(job_id, str(exc))
-
-    async def _process_collector_job(self, job_id: str):
-        data = await self.jobs_repository.get_job_with_book(job_id)
+    async def run(self, job: Job):
+        # XXX: should rewrite get_job_with_book() as get_book()
+        data = await self.jobs_repository.get_job_with_book(job.id)
         if not data:
             return
         job, book = data
@@ -66,7 +59,7 @@ class SentenceCollectionWorker:
             sentences = await self.nlp_service.extract_sentences(page_text)
             current_page += batch_size
             seq_counter = await self.jobs_repository.save_collected_sentences_batch(
-                job_id=job_id,
+                job_id=job.id,
                 book_id=book.id,
                 sentence_texts=[s.content.strip() for s in sentences],
                 start_seq=seq_counter,
@@ -95,7 +88,7 @@ class SentenceCollectionWorker:
             )
 
         await self.jobs_repository.complete_collector_job(
-            job_id=job_id,
+            job_id=job.id,
             book_id=book.id,
             preprocessor_specs=preprocessor_specs,
             total_sentences=total_sentences,
