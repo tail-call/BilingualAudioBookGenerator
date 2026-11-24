@@ -8,23 +8,24 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bookaudio.jobs_repository import JobsRepository
 from bookaudio.database import get_db, init_db
-from bookaudio.nlp import NLPService
-from bookaudio.models import Book, Job, JobStatus, JobType
 from bookaudio.jobs_orchestrator import JobOrchestrator
+from bookaudio.jobs_repository import JobsRepository
+from bookaudio.models import Book, Job, JobStatus, JobType
+from bookaudio.nlp import NLPService
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "output"
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+jobs_repository = JobsRepository()
 orchestrator = JobOrchestrator(
     BASE_DIR,
     nlp_service=NLPService(),
-    jobs_repository=JobsRepository(),
+    jobs_repository=jobs_repository,
 )
 
 
@@ -62,7 +63,6 @@ async def create_job(
     pdf: UploadFile = File(..., description="PDF file to convert"),
     source_language: str = Form("English"),
     target_language: str = Form("Russian"),
-    db: AsyncSession = Depends(get_db),
 ):
     """Upload a PDF and register the book."""
     if not pdf.filename or not pdf.filename.lower().endswith(".pdf"):
@@ -71,19 +71,12 @@ async def create_job(
     book_id = uuid.uuid4().hex[:12]
     pdf_path = UPLOAD_DIR / f"{book_id}_{pdf.filename}"
 
-    content = await pdf.read()
-    pdf_path.write_bytes(content)
+    pdf_bytes = await pdf.read()
+    pdf_path.write_bytes(pdf_bytes)
 
-    book = Book(
-        id=book_id,
-        pdf_filename=pdf.filename,
-        pdf_path=str(pdf_path),
-        source_language=source_language,
-        target_language=target_language,
-        status=JobStatus.PENDING,
+    await jobs_repository.create_job(
+        book_id, pdf.filename, pdf_path, source_language, target_language
     )
-    db.add(book)
-    await db.commit()
 
     return {
         "job_id": book_id,

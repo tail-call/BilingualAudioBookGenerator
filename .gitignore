@@ -9,10 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
-# TTS outputs
+# TTS outputs and uploads
 output/**/*.mp3
 output.supertonic/*.mp3
 output.qwen3tts/*.mp3
+uploads/
 
 # PDF source files
 pdf/*.pdf

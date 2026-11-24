@@ -2,10 +2,10 @@ import asyncio
 import logging
 import traceback
 
-from protocols import Runnable
-
 from bookaudio.jobs_repository import JobsRepository
 from bookaudio.models import Job, JobType
+
+from .protocols import Runnable
 
 logger = logging.getLogger(__name__)
 

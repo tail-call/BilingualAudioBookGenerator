@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import func, select, update
 
@@ -7,6 +8,7 @@ from bookaudio.database import AsyncSessionLocal
 from bookaudio.models import Book, Job, JobStatus, JobType, Sentence
 
 
+# XXX: currently it's a repository of all kinds of things
 class JobsRepository:
     def __init__(self, session_factory=AsyncSessionLocal):
         self.session_factory = session_factory
@@ -21,6 +23,25 @@ class JobsRepository:
             )
             res = await session.execute(stmt)
             return res.rowcount or 0
+
+    async def create_job(
+        self,
+        book_id: str,
+        pdf_filename: str,
+        pdf_path: Path,
+        source_language: str,
+        target_language: str,
+    ):
+        async with self.session_factory() as session, session.begin():
+            book = Book(
+                id=book_id,
+                pdf_filename=pdf_filename,
+                pdf_path=str(pdf_path),
+                source_language=source_language,
+                target_language=target_language,
+                status=JobStatus.PENDING,
+            )
+            session.add(book)
 
     async def claim_next_job(self, job_type: JobType) -> str | None:
         """Claim the next pending job of the given type using SKIP LOCKED."""
@@ -260,9 +281,7 @@ class JobsRepository:
                 )
             )
 
-    async def fail_job(
-        self, job_id: str, error_msg: str, max_retries: int = 3
-    ) -> None:
+    async def fail_job(self, job_id: str, error_msg: str, max_retries: int = 3) -> None:
         async with self.session_factory() as session, session.begin():
             job = await session.get(Job, job_id)
             if not job:
