@@ -1,10 +1,10 @@
-from bookaudio.database import AsyncSessionLocal
-from bookaudio.models import Book, Job, JobStatus, JobType, Sentence
+import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
 
-import uuid
-from datetime import UTC, datetime
+from bookaudio.database import AsyncSessionLocal
+from bookaudio.models import Book, Job, JobStatus, JobType, Sentence
 
 
 class JobsRepository:
